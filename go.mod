@@ -14,8 +14,6 @@ require (
 	github.com/Velocidex/ordereddict v0.0.0-20250821063524-02dc06e46238 // indirect
 	github.com/alecthomas/repr v0.5.4 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/get-sybers/gopinfo v0.0.0
+	github.com/get-sybers/gopinfo v0.1.0
 	golang.org/x/sys v0.48.0 // indirect
 )
-
-replace github.com/get-sybers/gopinfo => ../gopinfo

@@ -32,6 +32,7 @@ func TestSparseImageApple(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer zr.Close()
 	b, err := io.ReadAll(zr)
 	if err != nil {
 		t.Fatal(err)

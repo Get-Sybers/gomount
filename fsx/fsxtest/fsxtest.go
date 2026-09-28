@@ -24,6 +24,7 @@ func Open(t *testing.T, rel, name string) (*os.File, int64) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	defer zr.Close()
 	dst := filepath.Join(t.TempDir(), name+".img")
 	out, err := os.Create(dst)
 	if err != nil {
