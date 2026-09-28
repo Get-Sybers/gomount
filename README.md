@@ -122,34 +122,25 @@ gomount stays permissively licensed. Because the backing object is a regular
 file rather than a block or loop device, the kernel mount type is `fuse`
 (`FS_USERNS_MOUNT`), not `fuseblk`. gomount runs root-inside-a-user-namespace —
 it re-execs itself with `CLONE_NEWUSER|CLONE_NEWNS` (the pure-Go equivalent of
-`unshare -U -m -r`), or honours an existing user namespace from rootless podman.
+`unshare -U -m -r`), or honours a user namespace it is already running inside.
 No `CAP_SYS_ADMIN`, no loop device, no `--privileged`; the mount needs only
 `/dev/fuse` and a kernel that permits unprivileged user namespaces.
 
-The runtime image is `debian:trixie-slim` with `fuse3` and `ntfs-3g`, a
-declared deviation from the `FROM scratch` sibling tool images because the
-operator mount execs the distro `ntfs-3g` and its `fusermount3` helper. The Go
-binary itself is static (CGO off). The image is hardened the same way as the
-rest of the matrix: the package manager, sudo/su and the account tools are
-removed, every setuid/setgid bit is stripped, uid 0 is renamed and locked, and
-it runs as uid 2000; `sh` ships with the base and is declared
-(`/etc/dfir-hardened`: `shell=true python=false pkg_mgr=false`).
+The Go binary is static (CGO off). The `mount` verb execs the host's `ntfs-3g`
+and its `fusermount3` helper (it never links `libntfs-3g`), so a host running
+the `mount` verb needs `fuse3` and `ntfs-3g` installed; the read/stream verbs
+need neither. The hardened container image that ships those helpers (a declared
+`debian:trixie-slim` deviation from the `FROM scratch` sibling images) is built
+and documented in [GoDFIR-toolz](https://github.com/Get-Sybers/GoDFIR-toolz).
 
 ```sh
-docker build -t get-sybers/gomount:latest -f gomount/Dockerfile gomount
-# golang:trixie / debian:trixie-slim track the latest stable toolchain and base;
-# the build's apt-get update pulls the latest patched ntfs-3g + fuse3 (mkntfs
-# ships inside ntfs-3g on trixie — there is no separate ntfsprogs package)
+go install github.com/get-sybers/gomount@latest   # -> $(go env GOPATH)/bin/gomount
 
-# rootless podman (the container is already a user namespace):
-podman run --rm -it --device /dev/fuse -v "$PWD/evidence:/evidence:ro" \
-  get-sybers/gomount:latest mount --mount-point /mnt/ntfs /evidence/disk.E01
-
-# rootful docker (gomount self-bootstraps the user namespace):
-docker run --rm -it --device /dev/fuse \
-  --security-opt seccomp=unconfined --security-opt apparmor=unconfined \
-  -v "$PWD/evidence:/evidence:ro" \
-  get-sybers/gomount:latest mount /evidence/disk.E01
+# the `mount` verb execs the host's ntfs-3g + fusermount3 and needs /dev/fuse
+# plus unprivileged user namespaces, so install the helpers first, e.g.:
+#   sudo apt-get install -y fuse3 ntfs-3g
+# gomount self-bootstraps the user namespace (no sudo, no CAP_SYS_ADMIN):
+gomount mount --mount-point /mnt/ntfs ./evidence/disk.E01
 ```
 
 ```
@@ -193,16 +184,15 @@ the `mount` verb additionally needs `--device /dev/fuse`.
 ## Run
 
 ```sh
-docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
-  -v "$PWD/evidence:/evidence:ro" \
-  get-sybers/gomount:latest stream --filter '*.pf' /evidence/disk.E01 | gowindowlicker goprefetch --tar
+go install github.com/get-sybers/gomount@latest   # -> $(go env GOPATH)/bin/gomount
+
+# stream a filtered set of files out of an image and pipe them into a parser
+gomount stream --filter '*.pf' ./evidence/disk.E01 | gowindowlicker goprefetch --tar
 ```
 
-`test/contract_test.sh` builds the image and asserts the label set, the
-self-declaration against the filesystem, and the argv modes (usage on no
-arguments, a non-zero exit with nothing on stdout for a missing image);
-`test/mount-test.sh` and `test/userspace-test.sh` exercise the verbs on a
-host that provides `/dev/fuse` and `mkntfs`.
+`go test ./...` covers the decoders and userspace verbs; `test/mount-test.sh`
+and `test/userspace-test.sh` exercise the mount and userspace verbs end-to-end
+on a host that provides `/dev/fuse` and `mkntfs`.
 
 Both integration tests build their NTFS fixture with `mkntfs` (a
 partitionless superfloppy in a plain file), so no real evidence image is
@@ -225,9 +215,8 @@ checkout.
   follow. `--no-self-unshare` tells gomount the script already owns a
   suitable userns. Exit 3 = the environment cannot provide unprivileged
   FUSE (an environment report says why — not a gomount bug); the unprivileged
-  recipe is `docker run --rm --device /dev/fuse --security-opt
-  apparmor=unconfined --security-opt seccomp=unconfined
-  get-sybers/gomount:latest bash /test/mount-test.sh`.
+  recipe is `unshare -U -m -r bash test/mount-test.sh` on a host with
+  `/dev/fuse`, `fuse3` and `ntfs-3g`.
 - **`userspace-test.sh`** proves the pure-userspace path (`ls`/`cat`/`stat`/
   `stream` straight from the in-process parser): no mount, no FUSE, no
   separate process, no privilege — a parser bug is a Go panic, never host

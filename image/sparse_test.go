@@ -146,7 +146,7 @@ func TestEncryptedDMGRefused(t *testing.T) {
 // Readers in parallel over a DMG whose cache holds three chunks and a
 // bundle with more bands than open files: every read returns the right
 // bytes while chunks are decoded, cached and evicted, and band files
-// opened and closed, under each other (run under -race in CI or docker).
+// opened and closed, under each other (run under -race in CI).
 func TestConcurrentReads(t *testing.T) {
 	raw := dmgRawDisk(256)
 	dir := t.TempDir()
