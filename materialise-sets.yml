@@ -1,0 +1,236 @@
+# The artefact-set catalogue for `gomount materialise` — format and matching
+# rules: README.md (a data file, read via go:embed; never edit Go to add an artefact).
+sets:
+  registry-core:
+    primaries:
+      - '\Windows\System32\config\SYSTEM'
+      - '\Windows\System32\config\SOFTWARE'
+      - '\Windows\System32\config\SAM'
+      - '\Windows\System32\config\SECURITY'
+    siblings: ['.LOG1', '.LOG2']
+
+  amcache:
+    primaries:
+      - '\Windows\AppCompat\Programs\Amcache.hve'
+    siblings: ['.LOG1', '.LOG2']
+
+  shimcache:
+    primaries:
+      - '\Windows\System32\config\SYSTEM'
+    siblings: ['.LOG1', '.LOG2']
+
+  ntuser:
+    primaries:
+      - '\Users\*\NTUSER.DAT'
+    siblings: ['.LOG1', '.LOG2']
+
+  usrclass:
+    primaries:
+      - '\Users\*\AppData\Local\Microsoft\Windows\UsrClass.dat'
+    siblings: ['.LOG1', '.LOG2']
+
+  srum:
+    primaries:
+      - '\Windows\System32\sru\SRUDB.dat'
+    siblings: []
+
+  # the SUM/ parent stays in the output: goese treats *.mdb as SUM only under a literal SUM directory
+  sum:
+    primaries:
+      - '\Windows\System32\LogFiles\SUM\*.mdb'
+    siblings: []
+
+  timeline:
+    primaries:
+      - '\Users\*\AppData\Local\ConnectedDevicesPlatform\*\ActivitiesCache.db'
+    siblings: ['-wal', '-shm']
+
+  # the event logs (goevtx) — the modern channel files and the legacy .evt
+  winevt:
+    primaries:
+      - '\Windows\System32\winevt\Logs\*.evtx'
+      - '\Windows\System32\config\*.evt'
+    siblings: []
+
+  prefetch:
+    primaries:
+      - '\Windows\Prefetch\*.pf'
+    siblings: []
+
+  # the master file table (gomft)
+  mft:
+    primaries:
+      - '\$MFT'
+    siblings: []
+
+  # shell items: LNK files and the jump lists (gosbe / golnk)
+  recent:
+    primaries:
+      - '\Users\*\AppData\Roaming\Microsoft\Windows\Recent\*.lnk'
+      - '\Users\*\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\*'
+      - '\Users\*\AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations\*'
+    siblings: []
+
+  # the Recycle Bin index records ($I…) per SID
+  recyclebin:
+    primaries:
+      - '\$Recycle.Bin\*\$I*'
+    siblings: []
+
+  # every Windows artefact set the go* parsers read, in one name — what the
+  # DX_DFIR export pulls out of each image
+  windows-core:
+    primaries:
+      - '\$MFT'
+      - '\Windows\System32\config\SYSTEM'
+      - '\Windows\System32\config\SOFTWARE'
+      - '\Windows\System32\config\SAM'
+      - '\Windows\System32\config\SECURITY'
+      - '\Windows\AppCompat\Programs\Amcache.hve'
+      - '\Users\*\NTUSER.DAT'
+      - '\Users\*\AppData\Local\Microsoft\Windows\UsrClass.dat'
+      - '\Windows\System32\sru\SRUDB.dat'
+      - '\Windows\System32\LogFiles\SUM\*.mdb'
+      - '\Users\*\AppData\Local\ConnectedDevicesPlatform\*\ActivitiesCache.db'
+      - '\Windows\System32\winevt\Logs\*.evtx'
+      - '\Windows\System32\config\*.evt'
+      - '\Windows\Prefetch\*.pf'
+      - '\Users\*\AppData\Roaming\Microsoft\Windows\Recent\*.lnk'
+      - '\Users\*\AppData\Roaming\Microsoft\Windows\Recent\AutomaticDestinations\*'
+      - '\Users\*\AppData\Roaming\Microsoft\Windows\Recent\CustomDestinations\*'
+      - '\$Recycle.Bin\*\$I*'
+    siblings: ['.LOG1', '.LOG2', '-wal', '-shm']
+
+  # docs/linux §5.4: the root-filesystem surface the daemon parsers consume
+  linux-core:
+    primaries:
+      - 'var/log/**'
+      - 'etc/passwd'
+      - 'etc/shadow'
+      - 'etc/group'
+      - 'etc/gshadow'
+      - 'etc/sudoers'
+      - 'etc/sudoers.d/**'
+      - 'etc/crontab'
+      - 'etc/cron.d/**'
+      - 'etc/cron.daily/**'
+      - 'etc/cron.hourly/**'
+      - 'etc/cron.weekly/**'
+      - 'etc/cron.monthly/**'
+      - 'etc/anacrontab'
+      - 'etc/ssh/**'
+      - 'etc/systemd/**'
+      - 'etc/os-release'
+      - 'usr/lib/os-release'
+      - 'etc/hostname'
+      - 'etc/hosts'
+      - 'etc/fstab'
+      - 'etc/crypttab'
+      - 'etc/machine-id'
+      - 'etc/timezone'
+      - 'etc/localtime'
+      - 'etc/adjtime'
+      - 'etc/nsswitch.conf'
+      - 'etc/resolv.conf'
+      - 'etc/hosts.allow'
+      - 'etc/hosts.deny'
+      - 'etc/ld.so.preload'
+      - 'etc/ld.so.conf'
+      - 'etc/ld.so.conf.d/**'
+      - 'etc/sysctl.conf'
+      - 'etc/sysctl.d/**'
+      - 'etc/modprobe.d/**'
+      - 'etc/modules-load.d/**'
+      - 'etc/NetworkManager/system-connections/**'
+      - 'etc/netplan/**'
+      - 'etc/network/interfaces'
+      - 'var/spool/cron/**'
+      - 'var/spool/at/**'
+      - 'var/run/utmp'
+      - 'run/utmp'
+      - 'usr/lib/systemd/system/**'
+      - 'lib/systemd/system/**'
+      - 'run/systemd/system/**'
+      - 'lost+found/**'
+      - 'var/lib/dpkg/status'
+      - 'var/lib/rpm/**'
+      - 'var/lib/pacman/local/**'
+      - 'var/lib/snapd/state.json'
+      - 'home/*/.bash_history'
+      - 'home/*/.zsh_history'
+      - 'home/*/.local/share/fish/fish_history'
+      - 'home/*/.python_history'
+      - 'home/*/.mysql_history'
+      - 'home/*/.psql_history'
+      - 'home/*/.ssh/**'
+      - 'home/*/.config/systemd/user/**'
+      - 'home/*/.local/share/Trash/**'
+      - 'root/.bash_history'
+      - 'root/.zsh_history'
+      - 'root/.ssh/**'
+      - 'root/.config/systemd/user/**'
+      - 'root/.local/share/Trash/**'
+      - '.Trash-*/info/**'
+    siblings: ['-wal', '-shm']
+
+  # the macOS counterpart: what godaemonhunter's parsers read off a Mac's
+  # Data volume (or a single HFS+ volume) — identity, accounts, launchd,
+  # logs, schedules, histories; the sealed System volume's own /System/
+  # Library is a second pass, not this set
+  macos-core:
+    primaries:
+      - 'System/Library/CoreServices/SystemVersion.plist'
+      - 'Library/Preferences/SystemConfiguration/preferences.plist'
+      - 'Library/Preferences/.GlobalPreferences.plist'
+      - 'Library/Preferences/com.apple.loginwindow.plist'
+      - 'Library/Preferences/com.apple.timezone.auto.plist'
+      - 'Library/LaunchDaemons/**'
+      - 'Library/LaunchAgents/**'
+      - 'Library/StartupItems/**'
+      - 'System/Library/LaunchDaemons/**'
+      - 'System/Library/LaunchAgents/**'
+      - 'private/var/db/com.apple.xpc.launchd/**'
+      - 'private/var/db/dslocal/nodes/Default/users/**'
+      - 'private/var/db/dslocal/nodes/Default/groups/**'
+      - 'private/var/db/com.apple.backgroundtaskmanagement/**'
+      - 'private/var/log/**'
+      - 'private/var/run/utmpx'
+      - 'private/var/at/**'
+      - 'private/etc/passwd'
+      - 'private/etc/master.passwd'
+      - 'private/etc/group'
+      - 'private/etc/sudoers'
+      - 'private/etc/sudoers.d/**'
+      - 'private/etc/hosts'
+      - 'private/etc/localtime'
+      - 'private/etc/crontab'
+      - 'private/etc/periodic/**'
+      - 'private/etc/periodic.conf'
+      - 'private/etc/periodic.conf.local'
+      - 'private/etc/ssh/**'
+      - 'private/var/root/.bash_history'
+      - 'private/var/root/.zsh_history'
+      - 'private/var/root/.bash_sessions/**'
+      - 'private/var/root/.zsh_sessions/**'
+      - 'private/var/root/.ssh/**'
+      - 'private/var/root/Library/LaunchAgents/**'
+      - 'Users/*/.bash_history'
+      - 'Users/*/.zsh_history'
+      - 'Users/*/.bash_sessions/**'
+      - 'Users/*/.zsh_sessions/**'
+      - 'Users/*/.python_history'
+      - 'Users/*/.ssh/**'
+      - 'Users/*/Library/LaunchAgents/**'
+      - 'Users/*/Library/Preferences/com.apple.loginitems.plist'
+      - 'Users/*/Library/Application Support/com.apple.backgroundtaskmanagementagent/**'
+    siblings: ['-wal', '-shm']
+
+  # the sealed System volume's side of a modern Mac (macOS 10.15+ splits the
+  # OS from the Data volume): the OS version and Apple's own launchd jobs —
+  # godaemonhunter pulls this in a second pass from the System volume
+  macos-system:
+    primaries:
+      - 'System/Library/CoreServices/SystemVersion.plist'
+      - 'System/Library/LaunchDaemons/**'
+      - 'System/Library/LaunchAgents/**'
+    siblings: []
