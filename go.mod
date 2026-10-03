@@ -1,6 +1,6 @@
 module github.com/Get-Sybers/gomount
 
-go 1.26.0
+go 1.27.1
 
 require (
 	github.com/Get-Sybers/gopinfo v0.2.0
