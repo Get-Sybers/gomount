@@ -1,3 +1,5 @@
+github.com/Get-Sybers/gopinfo v0.2.0 h1:pGq5L3KRndCZwmzfNQ3+fR0A+mctNRmmcWTw5gqY7Ho=
+github.com/Get-Sybers/gopinfo v0.2.0/go.mod h1:zl3HyzkoEBmlXTBKU+pdRaFcCE/Yx5XlUTLAwn4jJ7s=
 github.com/Velocidex/go-ewf v0.0.0-20260301075014-ed09cb7887b6 h1:cQlOHhEsxORLNodH/1nQ7Hmtx39L9y3Cf84u/72IOZQ=
 github.com/Velocidex/go-ewf v0.0.0-20260301075014-ed09cb7887b6/go.mod h1:IcxqNLAHspbh8umTGC1zDxZVzkEkTRqtawbg7VFzzFQ=
 github.com/Velocidex/json v0.0.0-20220224052537-92f3c0326e5a h1:AeXPUzhU0yhID/v5JJEIkjaE85ASe+Vh4Kuv1RSLL+4=
@@ -44,8 +46,6 @@ github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/
 github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
 github.com/stretchr/testify v1.8.1 h1:w7B6lhMri9wdJUVmEZPGGhZzrYTPvgJArz7wNPgYKsk=
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
-github.com/Get-Sybers/gopinfo v0.2.0 h1:9mPOewsYjMV9RX7kz8VYfIXr0qdPRqtQq0IgBPxyiYc=
-github.com/Get-Sybers/gopinfo v0.2.0/go.mod h1:FI4a1Eg0VmRk95Co11Ky80dosEZ5Sp5HZGALOdC0zjM=
 golang.org/x/sys v0.48.0 h1:bbX/i/6MgT9BVLM9RT1thmxL04yeTAhbEz4SyadbXoo=
 golang.org/x/sys v0.48.0/go.mod h1:hNLxWAXmnKAxqDtdwIYC4bM9oQPEecfsnNMuSxOs3og=
 gopkg.in/check.v1 v0.0.0-20161208181325-20d25e280405/go.mod h1:Co6ibVJAznAaIkqp8huTwlJQCZ016jof/cbN4VW5Yz0=
