@@ -10,6 +10,7 @@ package apfs
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"io"
 	"os"
 	"strconv"
@@ -35,7 +36,8 @@ func TestFletcher64RoundTrip(t *testing.T) {
 		t.Fatal("a flipped bit must fail the checksum")
 	}
 	// the same bytes checksum the same way twice: no hidden state
-	if fletcher64(block[8:]) != fletcher64(block[8:]) {
+	first, second := fletcher64(block[8:]), fletcher64(block[8:])
+	if first != second {
 		t.Fatal("fletcher64 is not a pure function")
 	}
 }
@@ -271,7 +273,7 @@ func TestEvidenceContainer(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatalf("walk: %v", err)
 	}
 	t.Logf("walked %d entries, spot-read %d files", count, compressed)

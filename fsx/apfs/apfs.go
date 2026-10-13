@@ -30,8 +30,8 @@ import (
 func init() {
 	fsx.Register(fsx.Detector{
 		Type:  "apfs",
-		Probe: func(ra io.ReaderAt, size int64) bool { return Probe(ra, size) },
-		Open:  func(ra io.ReaderAt, size int64) (fsx.FS, error) { return Open(ra, size) },
+		Probe: Probe,
+		Open:  Open,
 	})
 }
 

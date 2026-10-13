@@ -160,7 +160,7 @@ func OpenImage(path string) (ra io.ReaderAt, size int64, closer func() error, er
 	for _, p := range segs {
 		h, err := os.Open(p) // O_RDONLY
 		if err != nil {
-			closeAll()
+			_ = closeAll()
 			return nil, 0, nil, fmt.Errorf("open EWF segment %s: %w", p, err)
 		}
 		files = append(files, h)
@@ -169,11 +169,11 @@ func OpenImage(path string) (ra io.ReaderAt, size int64, closer func() error, er
 
 	ef, err := ewf.OpenEWFFile(nil, readers...)
 	if err != nil {
-		closeAll()
+		_ = closeAll()
 		return nil, 0, nil, fmt.Errorf("parse EWF set: %w", err)
 	}
 	if ef.TotalImageSize <= 0 {
-		closeAll()
+		_ = closeAll()
 		return nil, 0, nil, errors.New("EWF set reports non-positive media size")
 	}
 	return ef, ef.TotalImageSize, closeAll, nil

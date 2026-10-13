@@ -374,7 +374,7 @@ func TestDMGMalformedImages(t *testing.T) {
 		"rsrc garbage":    func(b []byte) { put64(k+224, 0)(b); put64(k+40, 0)(b); put64(k+48, 64)(b) },
 		"sector count":    put64(k+492, 1<<60),
 		"xml not a plist": func(b []byte) { copy(b[xmlOff:], "<html>") },
-		"xml no blkx":     func(b []byte) { copy(b[bytes.Index(b, []byte("<key>blkx")):], "<key>BLKX") },
+		"xml no blkx":     func(b []byte) { copy(b[bytes.Index(b, []byte("<key>blkx")):], "<key>BLKX") }, //nolint:gocritic // offBy1: the fixture carries the key, so Index never returns -1
 		"xml bad base64":  func(b []byte) { b[bytes.Index(b, []byte("<data>"))+10] = '*' },
 	} {
 		b := append([]byte(nil), src...)

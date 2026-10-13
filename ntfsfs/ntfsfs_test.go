@@ -2,6 +2,7 @@ package ntfsfs
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -350,7 +351,8 @@ func TestWalk(t *testing.T) {
 		files[e.Path] = walked{size: e.Size, content: content}
 		return nil
 	})
-	if we, ok := err.(*WalkErrors); ok {
+	var we *WalkErrors
+	if errors.As(err, &we) {
 		t.Logf("walk skipped %d entr(y/ies) (tolerated): %v", we.Count, we.Error())
 	} else if err != nil {
 		t.Fatalf("Walk: %v", err)

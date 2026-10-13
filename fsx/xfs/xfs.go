@@ -26,7 +26,7 @@ import (
 func init() {
 	fsx.Register(fsx.Detector{
 		Type:  "xfs",
-		Probe: func(ra io.ReaderAt, size int64) bool { return probe(ra, size) },
+		Probe: probe,
 		Open:  func(ra io.ReaderAt, size int64) (fsx.FS, error) { return Open(ra, size) },
 	})
 }

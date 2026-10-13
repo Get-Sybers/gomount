@@ -16,7 +16,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"github.com/Get-Sybers/gopinfo/framework"
 	"io"
 	"os"
 	"path"
@@ -25,6 +24,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/Get-Sybers/gopinfo/framework"
 
 	yaml "github.com/Velocidex/yaml/v2"
 
@@ -177,7 +178,7 @@ func runMaterialise(argv []string) int {
 		sum.Failures = []framework.Failure{{Item: fs.Arg(0), Error: err.Error()}}
 		return finish("partial", 3)
 	}
-	defer closer()
+	defer func() { _ = closer() }()
 
 	// The manifest rows' origin chain (rule 2): the image, the volume's
 	// place in the stack, and the filesystem's durable identity.

@@ -2,6 +2,7 @@ package hfsplus
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -181,7 +182,7 @@ func (r *forkReader) readAll(limit int64) ([]byte, error) {
 		return nil, fmt.Errorf("hfsplus: fork of %d bytes exceeds the %d-byte limit", r.size, limit)
 	}
 	b := make([]byte, r.size)
-	if _, err := r.ReadAt(b, 0); err != nil && err != io.EOF {
+	if _, err := r.ReadAt(b, 0); err != nil && !errors.Is(err, io.EOF) {
 		return nil, err
 	}
 	return b, nil

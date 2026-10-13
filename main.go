@@ -220,7 +220,7 @@ func runMount(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: open image: %v\n", err)
 		return 1
 	}
-	defer closeImage()
+	defer func() { _ = closeImage() }()
 
 	// 2. Parse the partition table and select the NTFS volume to mount.
 	parts, err := partition.Partitions(ra, size)

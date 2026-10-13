@@ -3,7 +3,6 @@ package hfsplus
 import (
 	"encoding/binary"
 	"fmt"
-	"io"
 )
 
 // The attributes B-tree: keys are (file id, start block, name as
@@ -24,40 +23,12 @@ type xattr struct {
 	fork *forkReader // or a fork-backed value
 }
 
-func (x *xattr) size() int64 {
-	if x.fork != nil {
-		return x.fork.size
-	}
-	return int64(len(x.data))
-}
-
 // bytes reads the value whole (bounded).
 func (x *xattr) bytes() ([]byte, error) {
 	if x.fork != nil {
 		return x.fork.readAll(maxAttrValue)
 	}
 	return x.data, nil
-}
-
-// readerAt serves the value.
-func (x *xattr) readerAt() (io.ReaderAt, int64) {
-	if x.fork != nil {
-		return x.fork, x.fork.size
-	}
-	return bytesReaderAt(x.data), int64(len(x.data))
-}
-
-type bytesReaderAt []byte
-
-func (b bytesReaderAt) ReadAt(p []byte, off int64) (int, error) {
-	if off < 0 || off >= int64(len(b)) {
-		return 0, io.EOF
-	}
-	n := copy(p, b[off:])
-	if n < len(p) {
-		return n, io.EOF
-	}
-	return n, nil
 }
 
 // parseAttrKey reads (id, startBlock, name) off an attributes key.

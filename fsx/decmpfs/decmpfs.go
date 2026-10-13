@@ -12,6 +12,7 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 
@@ -159,7 +160,7 @@ func DecodeChunk(typ uint32, b []byte, size int64) ([]byte, error) {
 		defer zr.Close()
 		out := make([]byte, size)
 		n, err := io.ReadFull(zr, out)
-		if err != nil && err != io.ErrUnexpectedEOF && err != io.EOF {
+		if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) && !errors.Is(err, io.EOF) {
 			return nil, fmt.Errorf("decmpfs zlib: %w", err)
 		}
 		return out[:n], nil

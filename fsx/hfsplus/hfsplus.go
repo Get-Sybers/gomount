@@ -204,11 +204,11 @@ func Open(ra io.ReaderAt, size int64) (*FS, error) {
 	}
 
 	// the root folder proves the catalog reads; its thread record names the volume
-	if _, name, err := f.threadOf(rootFolderID); err != nil {
+	_, label, err := f.threadOf(rootFolderID)
+	if err != nil {
 		return nil, fmt.Errorf("hfsplus: root folder: %w", err)
-	} else {
-		f.label = name
 	}
+	f.label = label
 	f.privFileDir = f.childID(rootFolderID, "\x00\x00\x00\x00HFS+ Private Data")
 	f.privDirDir = f.childID(rootFolderID, ".HFS+ Private Directory Data\r")
 	return f, nil
@@ -240,12 +240,4 @@ func volumeUUID(id []byte) string {
 	u[6] = u[6]&0x0f | 0x30
 	u[8] = u[8]&0x3f | 0x80
 	return fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
-}
-
-// readBlocks reads n bytes at a byte offset within the volume.
-func (f *FS) readAt(off int64, n int) ([]byte, error) {
-	if off < 0 || off+int64(n) > f.size {
-		return nil, fmt.Errorf("hfsplus: read %d bytes at %#x: outside the volume", n, off)
-	}
-	return fsx.ReadFull(f.ra, off, n)
 }

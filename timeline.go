@@ -85,7 +85,7 @@ func runTimeline(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: open image: %v\n", err)
 		return 1
 	}
-	defer closeImage()
+	defer func() { _ = closeImage() }()
 	vols, _, err := resolveVolumes(ra, size)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
