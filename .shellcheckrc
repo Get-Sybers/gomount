@@ -1,0 +1,12 @@
+# shellcheck — every optional check on (build-and-test.md §2.1, §3.3), minus
+# the ones below, each a documented choice rather than a silenced finding.
+enable=all
+# SC2250: require ${var} braces on every expansion — the scripts quote every
+# expansion already; the braces add nothing but noise
+disable=SC2250
+# SC2312: "consider invoking this command separately to avoid masking its
+# return value" — a command substitution inside a test is deliberate here
+disable=SC2312
+# SC2310, SC2311: a function in a condition or substitution disables set -e —
+# the gate scripts run without set -e by design and count failures themselves
+disable=SC2310,SC2311

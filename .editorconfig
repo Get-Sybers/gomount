@@ -1,0 +1,29 @@
+# EditorConfig (build-and-test.md §2.1): what every editor, editorconfig-checker
+# and shfmt agree on. The [[shell]] section carries every shfmt formatting flag.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.go]
+indent_style = tab
+
+[{Makefile,*.mk,go.mod,go.sum,go.work}]
+indent_style = tab
+
+[*.md]
+# two trailing spaces are a hard line break in Markdown
+trim_trailing_whitespace = false
+
+[[shell]]
+indent_style = space
+indent_size = 2
+shell_variant = bash
+binary_next_line = true
+switch_case_indent = true
+space_redirects = false
