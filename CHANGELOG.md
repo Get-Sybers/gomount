@@ -6,6 +6,8 @@ All notable changes are documented here, following
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-15
+
 ### Fixed
 - **Fedora/RHEL volume groups assemble.** The LVM2 metadata text parser
   honours the two escapes LVM writes inside quoted strings (`\"` and `\\`),
@@ -97,7 +99,8 @@ this and the earlier tags.
 
 ## [0.1.0] - 2026-09-28
 
-[Unreleased]: https://github.com/Get-Sybers/gomount/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Get-Sybers/gomount/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Get-Sybers/gomount/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Get-Sybers/gomount/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Get-Sybers/gomount/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Get-Sybers/gomount/releases/tag/v0.1.0
