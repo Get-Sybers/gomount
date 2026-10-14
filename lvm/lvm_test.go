@@ -257,8 +257,8 @@ stripes = [
 	if _, err := ra.ReadAt(buf, present); err == nil || !strings.Contains(err.Error(), "truncated capture") {
 		t.Fatalf("read past the present bytes: %v", err)
 	}
-	// a VG whose PVs are whole names nothing
-	pv.Size = 16265510912
+	// a VG whose PVs are whole names nothing (the real PV's dev_size)
+	pv.Size = 16269705216
 	vg, err = buildVG("fedora", text, []*PV{pv})
 	if err != nil {
 		t.Fatal(err)
