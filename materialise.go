@@ -25,11 +25,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Get-Sybers/gopinfo/framework"
-
 	yaml "github.com/Velocidex/yaml/v2"
 
 	"github.com/Get-Sybers/gomount/fsx"
+	"github.com/Get-Sybers/gopinfo/framework"
 )
 
 // materialiseSetsYAML is the embedded artefact-set catalogue. Keeping the set

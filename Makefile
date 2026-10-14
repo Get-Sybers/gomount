@@ -18,7 +18,7 @@ TEST_FLAGS ?= -count=1 -shuffle=on -cover
 # build-tag sets that must also vet, build and test (go-standards.md §9)
 BUILD_TAGS ?=
 # GOOS/GOARCH pairs the module must cross-compile for, CGO_ENABLED=0
-CROSS_TARGETS ?= 
+CROSS_TARGETS ?=
 export VET_FLAGS TEST_FLAGS BUILD_TAGS CROSS_TARGETS
 
 .PHONY: build test vet fmt fmt-check tidy generate conform lint structlint vuln upgrade clean

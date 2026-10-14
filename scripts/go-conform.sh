@@ -117,7 +117,7 @@ for m in "${MODS[@]}"; do
   done
 
   # go:generate drift, when the module declares a directive: a generated
-  # artifact that differs from its data file fails (go-standards §5)
+  # artefact that differs from its data file fails (go-standards §5)
   if (cd "$d" && git ls-files -z -- '*.go' | xargs -0 -r grep -l '^//go:generate' | grep -q .); then
     before=$(cd "$d" && git status --porcelain -- . | sort)
     if gen_out=$(cd "$d" && go generate ./... 2>&1); then

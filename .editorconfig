@@ -20,6 +20,8 @@ indent_style = tab
 # two trailing spaces are a hard line break in Markdown
 trim_trailing_whitespace = false
 
+# [[shell]] is shfmt's own section name, not an EditorConfig glob: it matches every
+# file shfmt detects as shell, by extension or shebang (man shfmt, "EditorConfig").
 [[shell]]
 indent_style = space
 indent_size = 2
