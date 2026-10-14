@@ -6,6 +6,19 @@ All notable changes are documented here, following
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-15
+
+### Fixed
+- **A hard link to a symlink is that symlink.** On a merged-usr host
+  `/usr/lib/systemd/system/x.service` and `/lib/systemd/system/x.service`
+  are one symlink inode; GNU tar stores the first and links the second, so a
+  UAC collection carries hard links whose target is a symlink (89 of the 400
+  hard links in a real LS24 collection, every one a systemd unit). The `uac`
+  package resolved a hard link to its target's *bytes* alone, so those came
+  out as empty regular files — `stat` said a file, `materialise` staged an
+  empty unit and gounit parsed nothing. They now come out as the symlink,
+  target and all (a hard link to a directory stays a directory).
+
 ## [0.3.0] - 2026-10-15
 
 ### Fixed
@@ -99,7 +112,8 @@ this and the earlier tags.
 
 ## [0.1.0] - 2026-09-28
 
-[Unreleased]: https://github.com/Get-Sybers/gomount/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Get-Sybers/gomount/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Get-Sybers/gomount/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Get-Sybers/gomount/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Get-Sybers/gomount/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Get-Sybers/gomount/compare/v0.1.0...v0.2.0
