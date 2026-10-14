@@ -159,12 +159,12 @@ func isCollectionMember(name string) bool {
 }
 
 // cleanName folds an archive member name to a slash path with no leading
-// "./" or "/" and no trailing slash.
+// "./" or "/" and no trailing slash. A name that reduces to the root — "",
+// "/", "./", "." (the first member of `tar czf x.tgz .`) — is the empty
+// string, which the callers skip.
 func cleanName(name string) string {
 	name = strings.ReplaceAll(name, "\\", "/")
-	name = strings.TrimPrefix(name, "./")
-	name = strings.TrimLeft(name, "/")
-	return strings.TrimSuffix(path.Clean("/"+name), "/")[1:]
+	return strings.TrimPrefix(path.Clean("/"+name), "/")
 }
 
 // Open indexes the collection held by ra. It is a Detect followed by one

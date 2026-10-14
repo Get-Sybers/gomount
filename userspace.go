@@ -675,8 +675,11 @@ func tarNode(tw *tar.Writer, e fileEntry, kind string) error {
 	case "dir":
 		hdr.Typeflag = tar.TypeDir
 		hdr.Name += "/"
-		if hdr.Mode == 0o400 && e.Mode == 0 {
-			hdr.Mode = 0o755 // a directory nobody can enter extracts to nothing
+		if e.Mode&0o7777 == 0 {
+			// no permission bits — a backend that carries no mode, or a
+			// directory a UAC collection only implies (type bits alone):
+			// a directory nobody can enter extracts to nothing
+			hdr.Mode = 0o755
 		}
 	case "symlink":
 		hdr.Typeflag = tar.TypeSymlink

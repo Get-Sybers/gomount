@@ -198,10 +198,20 @@ func TestDetect(t *testing.T) {
 		{name: "notes/readme.txt", typ: tar.TypeReg, mode: 0o644, body: []byte("hi"), modTime: fixtureTime},
 		{name: "etc/passwd", typ: tar.TypeReg, mode: 0o644, body: []byte("root:x:0:0"), modTime: fixtureTime},
 	}
+	// `tar czf x.tgz .`: the root directory "./" first, then "./"-prefixed members
+	dotTar := append([]fixture{
+		{name: "./", typ: tar.TypeDir, mode: 0o755, modTime: fixtureTime},
+		{name: "./notes/", typ: tar.TypeDir, mode: 0o755, modTime: fixtureTime},
+	}, other...)
+	for i := range dotTar[2:] {
+		dotTar[2+i].name = "./" + dotTar[2+i].name
+	}
 	cases := map[string][]byte{
 		"plain tar.gz": writeTar(t, other, true),
 		"plain tar":    writeTar(t, other, false),
 		"plain zip":    writeZip(t, other),
+		"tar czf .":    writeTar(t, dotTar, true),
+		"zip -r .":     writeZip(t, dotTar),
 		"text":         bytes.Repeat([]byte("not an archive at all\n"), 64),
 		"short":        []byte("PK\x03\x04"),
 	}
@@ -410,6 +420,13 @@ func TestCleanName(t *testing.T) {
 		"[root]/":              "[root]",
 		"[root]\\etc\\passwd":  "[root]/etc/passwd",
 		"[root]/etc/../passwd": "[root]/passwd",
+		// names that reduce to the root: the empty string, never a panic
+		"":     "",
+		"/":    "",
+		"./":   "",
+		"//":   "",
+		".":    "",
+		"a/..": "",
 	}
 	for in, want := range cases {
 		t.Run(in, func(t *testing.T) {

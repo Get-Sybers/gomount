@@ -203,15 +203,22 @@ func TestTimelineAndStreamAllOverCollection(t *testing.T) {
 	}
 	tr := tar.NewReader(&tarOut)
 	kinds := map[string]byte{}
+	modes := map[string]int64{}
 	for {
 		hdr, err := tr.Next()
 		if err != nil {
 			break
 		}
 		kinds[hdr.Name] = hdr.Typeflag
+		modes[hdr.Name] = hdr.Mode
 	}
 	if kinds["etc/"] != tar.TypeDir || kinds["etc/os-release"] != tar.TypeSymlink || kinds["etc/passwd"] != tar.TypeReg {
 		t.Errorf("stream --all entries = %v", kinds)
+	}
+	// UAC lists files, never directories: the implied ones must still extract
+	// enterable, or `stream --all | tar -x` yields a tree nobody can browse
+	if modes["etc/"] != 0o755 || modes["etc/passwd"] != 0o644 {
+		t.Errorf("stream --all modes: etc/ %o (want 755), etc/passwd %o (want 644)", modes["etc/"], modes["etc/passwd"])
 	}
 }
 

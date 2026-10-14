@@ -272,7 +272,12 @@ func posixFS() *treeFS {
 	s := sampleFS()
 	s.dirs["/"] = append(s.dirs["/"],
 		fileEntry{Name: "etc", IsDir: true, Mode: 0o40755, UID: 0, GID: 0, Mtime: mtime, MFTID: "100"},
+		// type bits, no permission bits: a directory a UAC collection only implies
+		fileEntry{Name: "var", IsDir: true, Mode: 0o40000, Mtime: mtime, MFTID: "105"},
 	)
+	s.dirs["/var"] = []fileEntry{
+		{Name: "log", IsDir: true, Mode: 0o40000, Mtime: mtime, MFTID: "106"},
+	}
 	s.dirs["/etc"] = []fileEntry{
 		{Name: "passwd", Size: 6, Mode: 0o100644, UID: 0, GID: 0, Mtime: mtime, Atime: mtime.Add(time.Hour), Ctime: mtime, MFTID: "101"},
 		{Name: "localtime", Mode: 0o120777, LinkTarget: "/usr/share/zoneinfo/UTC", Mtime: mtime, MFTID: "102"},
@@ -318,6 +323,8 @@ func TestStreamAll(t *testing.T) {
 		{"etc/secret", tar.TypeReg, 0o600, 1000, ""},
 		{"etc/localtime", tar.TypeSymlink, 0o777, 0, "/usr/share/zoneinfo/UTC"},
 		{"Windows/", tar.TypeDir, 0o755, 0, ""}, // no mode on the entry: the enterable default
+		{"var/", tar.TypeDir, 0o755, 0, ""},     // type bits alone (an implied directory): the enterable default
+		{"var/log/", tar.TypeDir, 0o755, 0, ""},
 		{"note.txt", tar.TypeReg, 0o400, 0, ""}, // no mode on the entry: the read-only default
 	}
 	for _, c := range cases {
