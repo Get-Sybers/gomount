@@ -123,6 +123,13 @@ func writeZip(t *testing.T, fx []fixture) []byte {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
 	for _, f := range fx {
+		if f.typ == tar.TypeLink { // zip -r sees the path, not the inode: a link to a symlink is that symlink
+			for _, g := range fx {
+				if g.name == f.link && g.typ == tar.TypeSymlink {
+					f = fixture{name: f.name, typ: tar.TypeSymlink, mode: g.mode, link: g.link, modTime: f.modTime}
+				}
+			}
+		}
 		hdr := &zip.FileHeader{Name: f.name, Method: zip.Deflate, Modified: f.modTime}
 		mode := os.FileMode(f.mode)
 		if f.typ == tar.TypeSymlink {

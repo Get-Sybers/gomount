@@ -365,10 +365,20 @@ func (a *Archive) indexTar(src *io.SectionReader, size int64) error {
 		}
 		a.place(hdr.Name, m)
 	}
-	for _, hl := range pending { // a hard link reads its target's bytes
-		if t := a.lookupMember(hl.target); t != nil && t.open != nil {
+	// a hard link is its target's inode under another name: a file's bytes,
+	// or — on a merged-usr host, where /usr/lib/systemd/system/x.service and
+	// /lib/systemd/system/x.service are one symlink inode GNU tar stores
+	// once and links once — the symlink itself, target and all
+	for _, hl := range pending {
+		t := a.lookupMember(hl.target)
+		switch {
+		case t != nil && t.typ == typeSymlink:
+			hl.m.typ, hl.m.link = typeSymlink, t.link
+		case t != nil && t.typ == typeDir:
+			hl.m.typ = typeDir
+		case t != nil && t.open != nil:
 			hl.m.open, hl.m.size = t.open, t.size
-		} else {
+		default:
 			hl.m.open = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("")), nil }
 		}
 	}
