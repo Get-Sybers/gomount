@@ -13,9 +13,13 @@ name: CI
 # the module proxy) or the runner's own shellcheck.
 
 on:
-  push:
-    branches: ["**"]
+  # a pull request is the unit of review and carries the required check;
+  # main gets post-merge coverage; a branch without a pull request runs on
+  # demand. (push on every branch beside pull_request would run each commit
+  # twice, in two concurrency groups that cannot cancel each other.)
   pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
   schedule:
     # weekly, on an unchanged tree: govulncheck against the current database
