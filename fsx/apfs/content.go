@@ -38,7 +38,7 @@ func (r *extentReader) ReadAt(p []byte, off int64) (int, error) {
 		}
 		// the extent covering off; a gap between extents is a hole
 		var e *extent
-		var next int64 = r.size
+		next := r.size
 		for i := range r.exts {
 			x := &r.exts[i]
 			if uint64(off) >= x.logical && uint64(off) < x.logical+x.length {

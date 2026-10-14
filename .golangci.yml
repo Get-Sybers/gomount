@@ -1,0 +1,127 @@
+# golangci-lint v2 — the lint half of the Go gate (build-and-test.md §3.2;
+# go-standards.md §5, §6, §10, §11). `golangci-lint config verify` checks this
+# file; the binary version CI pins lives in .github/workflows/ci.yml.
+#
+# The linter set is the standard's. Every exclusion below says why. Three
+# rules the code does not meet yet are left out, with their count on adoption
+# (2026-10-13) — a backlog to clear, not an exemption (go-standards §14):
+#   gochecknoglobals (§5: tables and registries are data, not package vars): 48
+#   govet shadow (§3.2 "all analysers incl. shadow"): 43
+#   revive exported / package-comments / unused-parameter / var-naming: 11 / 10 / 9 / 0
+version: "2"
+
+run:
+  timeout: 10m
+  modules-download-mode: readonly
+
+linters:
+  default: standard # errcheck, govet, ineffassign, staticcheck, unused
+  enable:
+    - depguard
+    - errorlint
+    - gocritic
+    - gosec
+    - misspell
+    - nolintlint
+    - revive
+  settings:
+    depguard:
+      rules:
+        no-assertion-libraries:
+          list-mode: lax
+          deny:
+            - pkg: github.com/stretchr/testify
+              desc: go-standards §11 — assertions are explicit got/want checks on the standard testing package
+            - pkg: github.com/onsi/ginkgo
+              desc: go-standards §11 — the standard testing package only
+            - pkg: github.com/onsi/gomega
+              desc: go-standards §11 — the standard testing package only
+            - pkg: gotest.tools
+              desc: go-standards §11 — the standard testing package only
+    errcheck:
+      exclude-functions:
+        # a deferred rollback after a commit returns ErrTxDone by design
+        - (*database/sql.Tx).Rollback
+    gosec:
+      excludes:
+        - G104 # a duplicate of errcheck
+        - G110 # the tools decompress evidence containers by design
+        - G115 # integer conversions between on-disk widths are the parsers' job; the formats bound them
+        - G122 # the tools walk evidence trees; a root-scoped (os.Root) port is backlog
+        - G204 # the tools exec themselves, their sub-tools and the host's helpers with argv they build
+        - G301 # output directories are 0755 by design: the pipeline reads them as another uid
+        - G302 # staged evidence copies are chmod'ed read-only by design
+        - G304 # opening paths from the evidence tree is the tools' job
+        - G306 # output files are 0644 by design (see G301)
+        - G401 # legacy digests identify evidence (MD5 / SHA-1 columns); they are not security primitives
+        - G501 # (see G401)
+        - G505 # (see G401)
+        - G602 # the parsers index by a format's fixed offsets after a length check gosec's bounds analysis does not follow
+        - G702 # taint analyses: the tools exec themselves (G204), read paths derived from the image's
+        - G703 #   own directory and parse the image's own plist — all by design
+        - G709 #   (see G702)
+    misspell:
+      locale: UK
+      # comments only: identifiers mirror foreign APIs and on-disk formats
+      # (go-standards §6) and the output vocabulary is frozen
+      mode: restricted
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    revive:
+      # the default set, minus the four backlog rules named in the header
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: empty-block
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: superfluous-else
+        - name: time-naming
+        - name: unexported-return
+        - name: unreachable-code
+        - name: var-declaration
+    staticcheck:
+      checks:
+        - all
+        # quickfix suggestions are stylistic rewrites, applied at the author's discretion
+        - -QF1001
+        - -QF1002
+        - -QF1003
+        - -QF1008
+        # golangci-lint's own defaults: naming and comment style, covered by revive's backlog
+        - -ST1000
+        - -ST1003
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+  exclusions:
+    generated: lax
+    presets:
+      # unchecked Close / Flush / print / Remove / Setenv: the idioms errcheck's own documentation exempts
+      - std-error-handling
+    rules:
+      # test setup and fixture generators: unchecked writes into memory, math/rand
+      - path: (_test\.go|/(fsxtest|hfstest|imagetest)/)
+        linters:
+          - errcheck
+          - gosec
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/Get-Sybers

@@ -1,0 +1,15 @@
+# Code review (build-and-test.md §1, "what the repository owner approves"): the
+# branch ruleset requires a code-owner approval of the exact commits that merge.
+#
+# Get-Sybers is a user account, not an organisation, so the standard's
+# @get-sybers/maintainers and @get-sybers/owners teams cannot exist yet; the
+# owner reviews everything. Swap the handle for the team slugs when they do.
+*                                   @Get-Sybers
+
+# the pipeline and its pins
+/.github/                           @Get-Sybers
+/Makefile                           @Get-Sybers
+/scripts/                           @Get-Sybers
+/.golangci.yml                      @Get-Sybers
+/go.mod                             @Get-Sybers
+/go.sum                             @Get-Sybers

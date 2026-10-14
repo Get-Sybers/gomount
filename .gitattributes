@@ -1,0 +1,41 @@
+# Line endings: every text file is LF in the tree and on checkout, on every OS
+* text=auto eol=lf
+*.go text eol=lf
+*.sh text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+Makefile text eol=lf
+
+# Evidence fixtures and archives are never normalised or diffed as text
+*.gz binary
+*.xz binary
+*.zst binary
+*.E01 binary
+*.raw binary
+*.img binary
+*.dmg binary
+*.vmdk binary
+*.vhd binary
+*.vhdx binary
+*.qcow2 binary
+*.vdi binary
+*.db binary
+*.sqlite binary
+*.evtx binary
+*.pf binary
+*.lnk binary
+*.hve binary
+*.DAT binary
+*.dat binary
+*.docx binary
+*.bin binary
+
+# CI scaffolding never ships in an archive export
+.github/ export-ignore
+.editorconfig export-ignore
+.gitattributes export-ignore
+.golangci.yml export-ignore
+.shellcheckrc export-ignore
+
+# linguist
+docs/** linguist-documentation

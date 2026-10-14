@@ -382,8 +382,8 @@ func (r *lvReader) readOnce(p []byte, off int64) (int, error) {
 		ref := r.vg.pvs[leg.PVName]
 		pvOff := ref.peStart + leg.StartPE*eb + legChunk*cs + inChunk
 		run := cs - inChunk
-		if max := seg.ExtentCount*eb - segOff; run > max {
-			run = max
+		if limit := seg.ExtentCount*eb - segOff; run > limit {
+			run = limit
 		}
 		return boundedRead(ref.pv.ra, ref.pv.Size, pvOff, p, run)
 	}

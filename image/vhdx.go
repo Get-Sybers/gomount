@@ -13,14 +13,11 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
-	"strings"
 	"unicode/utf16"
 )
 
 var (
 	sigVhdxfile    = []byte("vhdxfile")
-	sigVhdxHead    = []byte("head")
 	sigVhdxRegi    = []byte("regi")
 	sigVhdxMeta    = []byte("metadata")
 	vhdxGUIDBat    = [16]byte{0x66, 0x77, 0xc2, 0x2d, 0x23, 0xf6, 0x00, 0x42, 0x9d, 0x64, 0x11, 0x5e, 0x9b, 0xfd, 0x4a, 0x08}
@@ -258,8 +255,8 @@ func openVHDX(path string, depth int) (*vhdxDisk, error) {
 	case dataBlocks > 0:
 		total = dataBlocks + (dataBlocks-1)/d.chunkRatio
 	}
-	if max := int64(batLen) / 8; total > max {
-		total = max
+	if maxEntries := int64(batLen) / 8; total > maxEntries {
+		total = maxEntries
 	}
 	if total > 1<<26 {
 		f.Close()
@@ -408,9 +405,4 @@ func (d *vhdxDisk) ReadAt(p []byte, off int64) (int, error) {
 		off += n
 	}
 	return total, nil
-}
-
-// vhdxParentBasename is the fallback for an absolute Windows path.
-func vhdxParentBasename(ref string) string {
-	return filepath.Base(filepath.FromSlash(strings.ReplaceAll(ref, "\\", "/")))
 }

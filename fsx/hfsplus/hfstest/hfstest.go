@@ -14,6 +14,7 @@ import (
 	"compress/zlib"
 	"encoding/binary"
 	"fmt"
+	"slices"
 	"sort"
 	"time"
 	"unicode/utf16"
@@ -413,9 +414,9 @@ func (b *builder) file(parent uint32, f File) {
 			w := zlib.NewWriter(&z)
 			w.Write(f.Data)
 			w.Close()
-			attr = append(hdr, z.Bytes()...)
+			attr = slices.Concat(hdr, z.Bytes())
 		case 5:
-			attr = append(hdr, make([]byte, 12)...)
+			attr = slices.Concat(hdr, make([]byte, 12))
 		case 4:
 			attr = hdr
 			rsrc := zlibRsrcFork(f.Data)
@@ -634,11 +635,6 @@ func sortAttrs(recs []rec) {
 }
 
 // ---- the B-tree file --------------------------------------------------------------
-
-type treeNode struct {
-	recs []rec // index nodes: key + 4-byte child
-	kind int8
-}
 
 // buildTree packs records into leaves, builds index levels up to a root,
 // and prepends the header node. Node 0 is the header; leaves follow, then

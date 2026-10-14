@@ -2,6 +2,7 @@ package hfsplus
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 )
@@ -56,7 +57,7 @@ func (f *FS) openBTree(fork *forkReader, name string) (*btree, error) {
 		return nil, fmt.Errorf("hfsplus: %s B-tree of %d bytes", name, fork.size)
 	}
 	hdr := make([]byte, 512)
-	if _, err := fork.ReadAt(hdr, 0); err != nil && err != io.EOF {
+	if _, err := fork.ReadAt(hdr, 0); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("hfsplus: %s B-tree header: %w", name, err)
 	}
 	be := binary.BigEndian
@@ -232,27 +233,6 @@ func (t *btree) seek(cmp func(key []byte) int) (*cursor, error) {
 		}
 	}
 	return nil, fmt.Errorf("hfsplus: %s B-tree deeper than %d levels", t.name, maxTreeDepth)
-}
-
-// first positions at the first leaf record of the tree.
-func (t *btree) first() (*cursor, error) {
-	if t.empty() || t.firstLeaf == 0 {
-		return nil, nil
-	}
-	n, err := t.node(t.firstLeaf)
-	if err != nil {
-		return nil, err
-	}
-	c := &cursor{t: t, node: n, i: 0}
-	if n.n == 0 {
-		if err := c.advance(); err != nil {
-			return nil, err
-		}
-		if c.node == nil {
-			return nil, nil
-		}
-	}
-	return c, nil
 }
 
 // valid reports whether the cursor sits on a record.

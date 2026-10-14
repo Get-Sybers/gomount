@@ -1,0 +1,134 @@
+name: CI
+
+# The pull-request gate of build-and-test.md (DX_DFIR, docs/reference): the
+# common lint gate, the Go gate and `all_green`, the one status check a branch
+# ruleset requires. Thin by design: every check reads its configuration from a
+# file in this repository (.golangci.yml, .shellcheckrc, .editorconfig,
+# Makefile, scripts/), so a linter change is a reviewed diff here, never an
+# edit to CI. The reusable workflows the standard places in get-sybers/.github
+# do not exist yet; this file is the same gate written out, and becomes a thin
+# caller of them when they do.
+#
+# No Python: every linter is a Go module (installed checksum-verified through
+# the module proxy) or the runner's own shellcheck.
+
+on:
+  # a pull request is the unit of review and carries the required check;
+  # main gets post-merge coverage; a branch without a pull request runs on
+  # demand. (push on every branch beside pull_request would run each commit
+  # twice, in two concurrency groups that cannot cancel each other.)
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    # weekly, on an unchanged tree: govulncheck against the current database
+    # and the toolchain as it stands today (build-and-test.md §6)
+    - cron: "37 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # the tool versions this gate pins, in one place; the `uses:` lines below
+  # carry their own SHA pins and Dependabot raises those
+  GOLANGCI_LINT_VERSION: v2.14.0
+  ACTIONLINT_VERSION: v1.7.12
+  SHFMT_VERSION: v3.14.1
+
+jobs:
+  lint:
+    name: lint
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: false # only tools are built here, not the module
+
+      - name: Install the pinned linters (Go modules, checksum-verified)
+        run: |
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          go install "mvdan.cc/sh/v3/cmd/shfmt@${SHFMT_VERSION}"
+
+      - name: Workflow syntax, expressions and run-scripts (actionlint + shellcheck)
+        run: actionlint
+
+      - name: Shell scripts (shfmt from .editorconfig, shellcheck from .shellcheckrc)
+        run: |
+          shfmt -d scripts
+          shellcheck scripts/*.sh
+
+      - name: Structure (must-have files, CHANGELOG Unreleased) and the structural lint
+        run: make structlint
+
+      - name: Pull request title is a Conventional Commit (it becomes the squash commit)
+        if: github.event_name == 'pull_request'
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          if ! printf '%s\n' "$TITLE" | grep -Eq '^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([^)]+\))?!?: .+'; then
+            echo "::error::the pull request title must read 'type(scope): summary' — build, chore, ci, docs, feat, fix, perf, refactor, revert, style or test"
+            exit 1
+          fi
+
+  go:
+    name: go (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Conform (gofmt, vet, build, test, tidy, cross-compile, generate drift, structlint)
+        run: make conform
+
+      - name: golangci-lint (.golangci.yml, config verified)
+        if: matrix.os == 'ubuntu-24.04'
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: ${{ env.GOLANGCI_LINT_VERSION }}
+
+  vuln:
+    name: govulncheck
+    runs-on: ubuntu-24.04
+    steps:
+      # the action checks the repository out itself; govulncheck stays at
+      # @latest on purpose — a vulnerability checker's value is the freshness
+      # of its database (build-and-test.md §8)
+      - uses: golang/govulncheck-action@032d45514ae346b1db93c04b0c90b841c370344f # v1.1.0
+        with:
+          go-version-file: go.mod
+          go-package: ./...
+
+  all_green:
+    name: all_green
+    if: always()
+    needs: [lint, go, vuln]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every required job succeeded
+        env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          printf '%s\n' "$RESULTS"
+          if printf '%s\n' "$RESULTS" | grep -Eq '"result": *"(failure|cancelled|skipped)"'; then
+            echo "::error::a required job failed, was cancelled or was skipped"
+            exit 1
+          fi

@@ -25,7 +25,7 @@ import (
 func init() {
 	fsx.Register(fsx.Detector{
 		Type:  "vfat",
-		Probe: func(ra io.ReaderAt, size int64) bool { return probe(ra, size) },
+		Probe: probe,
 		Open:  func(ra io.ReaderAt, size int64) (fsx.FS, error) { return Open(ra, size) },
 	})
 }
@@ -395,10 +395,10 @@ func dosTime(date, tim uint16, tenth byte) time.Time {
 	month := int(date>>5) & 0xF
 	day := int(date) & 0x1F
 	hour := int(tim >> 11)
-	min := int(tim>>5) & 0x3F
+	minute := int(tim>>5) & 0x3F
 	sec := int(tim&0x1F)*2 + int(tenth)/100
 	ns := (int(tenth) % 100) * 10 * int(time.Millisecond)
-	return time.Date(year, time.Month(month), day, hour, min, sec, ns, time.UTC)
+	return time.Date(year, time.Month(month), day, hour, minute, sec, ns, time.UTC)
 }
 
 // entry maps a rawEntry onto the fsx view.
@@ -615,9 +615,9 @@ func (f *FS) Residues(fn func(r fsx.Residue, open func() (io.ReadCloser, error))
 				rc := re
 				open = func() (io.ReadCloser, error) {
 					n := int64(rc.size)
-					max := f.size - f.clusterOffset(rc.cluster)
-					if n > max {
-						n = max
+					limit := f.size - f.clusterOffset(rc.cluster)
+					if n > limit {
+						n = limit
 					}
 					return io.NopCloser(io.NewSectionReader(f.ra, f.clusterOffset(rc.cluster), n)), nil
 				}

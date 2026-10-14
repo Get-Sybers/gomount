@@ -99,7 +99,7 @@ func identifyImageFile(path string) (*identifyDoc, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open image: %w", err)
 	}
-	defer closeImage()
+	defer func() { _ = closeImage() }()
 
 	doc := &identifyDoc{
 		Image:     identifyImage{Path: path, Format: sniffFormat(path), Size: size},

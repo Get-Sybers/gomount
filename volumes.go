@@ -192,17 +192,17 @@ func openVolume(imgPath string, volume int, lvName string) (volumeFS, fsx.FS, vo
 	}
 	vols, _, err := resolveVolumes(ra, size)
 	if err != nil {
-		closeImage()
+		_ = closeImage()
 		return nil, nil, volumeRef{}, nil, err
 	}
 	sel, err := selectVolume(vols, volume, lvName)
 	if err != nil {
-		closeImage()
+		_ = closeImage()
 		return nil, nil, volumeRef{}, nil, err
 	}
 	fsys, raw, release, err := openRef(sel)
 	if err != nil {
-		closeImage()
+		_ = closeImage()
 		return nil, nil, volumeRef{}, nil, fmt.Errorf("open %s (%s): %w", sel.Source, sel.FSType, err)
 	}
 	closer := func() error {

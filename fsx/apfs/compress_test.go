@@ -2,6 +2,7 @@ package apfs
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 	"testing"
 
@@ -70,7 +71,7 @@ func TestEvidenceCompression(t *testing.T) {
 		}
 		return nil
 	})
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		t.Fatal(err)
 	}
 	for typ, n := range seen {

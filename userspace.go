@@ -99,7 +99,7 @@ func runLs(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
 	}
-	defer closer()
+	defer func() { _ = closer() }()
 	if err := listDir(os.Stdout, fsys, dir, *long, *deleted); err != nil {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
@@ -158,7 +158,7 @@ func runCat(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
 	}
-	defer closer()
+	defer func() { _ = closer() }()
 	if err := catFile(os.Stdout, fsys, fs.Arg(1)); err != nil {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
@@ -195,7 +195,7 @@ func runStat(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
 	}
-	defer closer()
+	defer func() { _ = closer() }()
 	e, err := fsys.Stat(fs.Arg(1))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
@@ -250,7 +250,7 @@ func runTree(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
 	}
-	defer closer()
+	defer func() { _ = closer() }()
 	if err := treeDir(os.Stdout, fsys, dir, 0, *depth, ""); err != nil {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
@@ -299,7 +299,7 @@ func runBrowse(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
 	}
-	defer closer()
+	defer func() { _ = closer() }()
 	return browse(fsys, os.Stdin, os.Stdout, os.Stderr)
 }
 
@@ -468,7 +468,7 @@ func runStream(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
 	}
-	defer closer()
+	defer func() { _ = closer() }()
 	sum, err := streamVolume(os.Stdout, os.Stderr, fsys, *filter, *jsonl)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)

@@ -1,0 +1,27 @@
+# Dependabot (build-and-test.md §2.1, §6): weekly, grouped pull requests, a
+# seven-day cooldown after every upstream release. The action SHA pins in
+# .github/workflows/*.yml and the Go modules in go.mod are the two pin sets
+# this repository owns; nothing lands unless `all_green` passes and the owner
+# approves.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    groups:
+      go-modules:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
