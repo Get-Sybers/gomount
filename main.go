@@ -100,7 +100,7 @@ USERSPACE backend — pure in-process go-ntfs parsing, no mount, no FUSE, no pri
   gomount stat   [--volume N] <image> <path>
   gomount tree   [--volume N] [--depth D] <image> [path]
   gomount browse [--volume N] <image>
-  gomount stream [--volume N] [--filter GLOB] [--jsonl] <image>
+  gomount stream [--volume N] [--filter GLOB] [--jsonl] [--all] <image>
   gomount materialise [--volume N] --out DIR [--set NAME]... [--select GLOB]... \
                  [--siblings=true] [--manifest] <image>
   gomount identify <image>
@@ -122,11 +122,14 @@ USERSPACE backend — pure in-process go-ntfs parsing, no mount, no FUSE, no pri
                 (segmented), raw/dd/img, VMDK (sparse, streamOptimized, descriptor
                 + flat/split extents, snapshot chains), VHDX, VHD, QCOW2, VDI, DMG
                 (UDIF: zero/raw/ADC/zlib/bzip2/LZFSE chunks; not LZMA), a
-                .sparseimage, or a .sparsebundle directory
-  --volume N    1-based volume in the resolved stack; 0 = auto (largest NTFS,
-                else a Mac's APFS Data volume, else the HFS+ volume holding
-                SystemVersion.plist, else the volume holding /etc/os-release,
-                else largest known)
+                .sparseimage, or a .sparsebundle directory — or a UAC collection
+                (Unix-like Artifacts Collector: the tar.gz, tar or zip it writes),
+                whose [root]/ tree is volume 1, the host's files, and whose own
+                output (uac.log, bodyfile/, live_response/, …) is volume 2
+  --volume N    1-based volume in the resolved stack; 0 = auto (a UAC collection's
+                [root], else largest NTFS, else a Mac's APFS Data volume, else the
+                HFS+ volume holding SystemVersion.plist, else the volume holding
+                /etc/os-release, else largest known)
   --lv vg/lv    address an LVM2 logical volume by name
   -l            ls long listing: type, size, mtime, name
   --deleted     ls also carves directory-index slack for unlinked entries
@@ -134,6 +137,10 @@ USERSPACE backend — pure in-process go-ntfs parsing, no mount, no FUSE, no pri
   path[:stream] an alternate data stream is addressed as name:stream
   --filter GLOB stream: glob the base name, or the path when it holds '/' (default: all)
   --jsonl       stream: one JSON object per file {path,size,mtime,mftid} instead of a tar
+  --all         stream: the whole tree — directories and symlinks too, each entry with
+                the volume's uid/gid/mode and access/change times (PAX) — so the tar
+                extracts into a browsable root (the Linux and Mac filesystems; the
+                default is regular files only, mode 0400)
   --out DIR     materialise: output directory for the pulled artefacts (required)
   --set NAME    materialise: named artefact set to pull, repeatable (windows-core,
                 registry-core, amcache, shimcache, ntuser, usrclass, srum, sum,

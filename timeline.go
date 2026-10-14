@@ -91,6 +91,7 @@ func runTimeline(argv []string) int {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
 	}
+	defer closeCollections(vols)
 	if *volume > 0 || *lvName != "" {
 		sel, serr := selectVolume(vols, *volume, *lvName)
 		if serr != nil {
@@ -133,9 +134,15 @@ func runTimeline(argv []string) int {
 
 // timelineVolume emits one volume's rows.
 func timelineVolume(enc *json.Encoder, v volumeRef, withResidue, withHash bool, sum *timelineSummary) error {
-	fsys, err := fsx.Open(v.ra, v.Size)
+	_, fsys, release, err := openRef(v)
 	if err != nil {
 		return err
+	}
+	if release != nil {
+		defer release()
+	}
+	if fsys == nil {
+		return fmt.Errorf("no fsx backend for %s", v.FSType)
 	}
 	info := fsys.Info()
 	emit := func(e fsx.Entry, res *residueNote, open func() (io.ReadCloser, error)) error {

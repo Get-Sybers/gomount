@@ -67,6 +67,16 @@ type volumeFS interface {
 	Walk(fn func(e fileEntry, open func() (io.ReadCloser, error)) error) error
 }
 
+// treeWalker is the optional whole-tree seam a backend adds to volumeFS
+// for `stream --all`: WalkAll streams EVERY entry — directories and
+// symlinks too, a nil opener on anything that is not a regular file — so
+// the tar it feeds extracts back into a browsable root tree (what an
+// offline collector such as UAC is pointed at). The fsx backends satisfy
+// it; NTFS, whose POSIX identity does not exist, stays files-only.
+type treeWalker interface {
+	WalkAll(fn func(e fileEntry, open func() (io.ReadCloser, error)) error) error
+}
+
 // walkPartial reports that a Walk finished but skipped some unreadable entries.
 // The stream verb folds its count into the run summary rather than failing.
 type walkPartial struct {
@@ -208,12 +218,18 @@ func runStat(argv []string) int {
 // printStat writes one metadata field per line.
 func printStat(w io.Writer, e fileEntry) {
 	kind := "file"
-	if e.IsDir {
+	switch {
+	case e.IsDir:
 		kind = "directory"
+	case e.LinkTarget != "":
+		kind = "symlink"
 	}
 	fmt.Fprintf(w, "Path:       %s\n", e.Path)
 	fmt.Fprintf(w, "Name:       %s\n", e.Name)
 	fmt.Fprintf(w, "Type:       %s\n", kind)
+	if e.LinkTarget != "" {
+		fmt.Fprintf(w, "Target:     %s\n", e.LinkTarget)
+	}
 	fmt.Fprintf(w, "Size:       %d\n", e.Size)
 	fmt.Fprintf(w, "MFTId:      %s\n", e.MFTID)
 	if e.Deleted {
@@ -438,6 +454,10 @@ type streamRecord struct {
 	Size  int64  `json:"size"`
 	Mtime string `json:"mtime"`
 	MFTID string `json:"mftid"`
+	// --all only: "dir" | "symlink" on the entries the default stream omits
+	// (a regular file carries no type, so the default rows are unchanged)
+	Type       string `json:"type,omitempty"`
+	LinkTarget string `json:"link_target,omitempty"`
 }
 
 // streamSummary is the one-line stderr summary printed when a stream finishes.
@@ -453,10 +473,11 @@ func runStream(argv []string) int {
 	lvName := fs.String("lv", "", "address an LVM logical volume as vg/lv")
 	filter := fs.String("filter", "", "glob over the base name, or over the path when it contains '/' (default: all files)")
 	jsonl := fs.Bool("jsonl", false, "emit one JSON object per file instead of a tar stream")
+	all := fs.Bool("all", false, "every entry — directories and symlinks too — carrying the POSIX identity (uid, gid, mode) and the access/change times, so the tar extracts into a browsable root tree; the default is regular files only, mode 0400")
 	fs.Usage = usage
 	_ = fs.Parse(argv)
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "gomount stream: usage: stream [--volume N] [--filter GLOB] [--jsonl] <image>")
+		fmt.Fprintln(os.Stderr, "gomount stream: usage: stream [--volume N] [--filter GLOB] [--jsonl] [--all] <image>")
 		return 1
 	}
 	if _, err := path.Match(*filter, ""); err != nil {
@@ -469,7 +490,7 @@ func runStream(argv []string) int {
 		return 1
 	}
 	defer func() { _ = closer() }()
-	sum, err := streamVolume(os.Stdout, os.Stderr, fsys, *filter, *jsonl)
+	sum, err := streamVolume(os.Stdout, os.Stderr, fsys, *filter, *jsonl, *all)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
@@ -488,7 +509,14 @@ func runStream(argv []string) int {
 // returns the running totals. Memory is bounded — files stream through, never
 // buffered whole. A backend that skipped unreadable records (walkPartial) folds
 // into Errors rather than failing.
-func streamVolume(w, errOut io.Writer, fsys volumeFS, filter string, jsonl bool) (streamSummary, error) {
+//
+// With all set the walk is the whole tree (treeWalker): every directory and
+// symlink goes out too — the filter applies to files only, so the tree they
+// hang in always extracts — and each entry carries the volume's own uid,
+// gid, mode and access/change times (PAX), where the default stream's
+// entries are read-only regular files with the mtime alone. A backend
+// without the seam (NTFS) refuses --all rather than pretend.
+func streamVolume(w, errOut io.Writer, fsys volumeFS, filter string, jsonl, all bool) (streamSummary, error) {
 	var sum streamSummary
 	var tw *tar.Writer
 	if !jsonl {
@@ -496,28 +524,60 @@ func streamVolume(w, errOut io.Writer, fsys volumeFS, filter string, jsonl bool)
 	}
 	enc := json.NewEncoder(w)
 
-	walkErr := fsys.Walk(func(e fileEntry, open func() (io.ReadCloser, error)) error {
-		if !matchGlob(filter, e.Path) {
+	visit := func(e fileEntry, open func() (io.ReadCloser, error)) error {
+		kind := entryKind(e, open)
+		if kind == "" || (!all && kind != "file") {
+			return nil // a device, fifo or socket (or, by default, anything but a regular file)
+		}
+		if kind == "file" && !matchGlob(filter, e.Path) {
 			return nil
 		}
 		if jsonl {
-			if err := enc.Encode(streamRecord{Path: e.Path, Size: e.Size, Mtime: tsCol(e.Mtime), MFTID: e.MFTID}); err != nil {
+			rec := streamRecord{Path: e.Path, Size: e.Size, Mtime: tsCol(e.Mtime), MFTID: e.MFTID}
+			if kind != "file" {
+				rec.Type, rec.LinkTarget = kind, e.LinkTarget
+			}
+			if err := enc.Encode(rec); err != nil {
 				return err // a stdout write failure is fatal to the stream
 			}
-			sum.Files++
-			sum.Bytes += e.Size
+			if kind == "file" {
+				sum.Files++
+				sum.Bytes += e.Size
+			}
 			return nil
 		}
-		n, err := tarFile(tw, open, e)
+		var n int64
+		var err error
+		switch {
+		case kind != "file":
+			err = tarNode(tw, e, kind)
+		case all:
+			n, err = tarEntry(tw, open, e, fullHeader(e))
+		default:
+			n, err = tarFile(tw, open, e)
+		}
 		if err != nil {
 			sum.Errors++
 			fmt.Fprintf(errOut, "gomount stream: %s: %v\n", e.Path, err)
 			return nil
 		}
-		sum.Files++
-		sum.Bytes += n
+		if kind == "file" {
+			sum.Files++
+			sum.Bytes += n
+		}
 		return nil
-	})
+	}
+
+	var walkErr error
+	if all {
+		tree, ok := fsys.(treeWalker)
+		if !ok {
+			return sum, errors.New("--all needs a backend that walks the whole tree (the Linux and Mac filesystems); this volume streams files only")
+		}
+		walkErr = tree.WalkAll(visit)
+	} else {
+		walkErr = fsys.Walk(visit)
+	}
 	if tw != nil {
 		if err := tw.Close(); err != nil && walkErr == nil {
 			walkErr = err
@@ -550,6 +610,95 @@ func tarFile(tw *tar.Writer, open func() (io.ReadCloser, error), e fileEntry) (i
 		Mode:    0o400,
 		ModTime: e.Mtime,
 	}
+	if err := tw.WriteHeader(hdr); err != nil {
+		return 0, err
+	}
+	written, err := io.Copy(tw, io.LimitReader(r, e.Size))
+	if err != nil {
+		return written, err
+	}
+	if written < e.Size {
+		if perr := padZeros(tw, e.Size-written); perr != nil {
+			return written, perr
+		}
+	}
+	return e.Size, nil
+}
+
+// entryKind classifies a walked entry for the stream: "dir", "symlink",
+// "file" (a regular file, the one kind with an opener), or "" for a node
+// the stream never carries (device, fifo, socket).
+func entryKind(e fileEntry, open func() (io.ReadCloser, error)) string {
+	switch {
+	case e.IsDir:
+		return "dir"
+	case e.LinkTarget != "":
+		return "symlink"
+	case open != nil:
+		return "file"
+	}
+	return ""
+}
+
+// fullHeader is the --all header of one entry: the volume's own POSIX
+// identity — mode (permission and setuid/setgid/sticky bits; the type
+// rides the Typeflag), uid, gid — and every timestamp the backend has,
+// in PAX form so the access and change times survive. A backend that
+// carries no mode (zero) gets the read-only default.
+func fullHeader(e fileEntry) *tar.Header {
+	hdr := &tar.Header{
+		Name:    strings.TrimPrefix(e.Path, "/"),
+		Mode:    int64(e.Mode & 0o7777),
+		Uid:     int(e.UID),
+		Gid:     int(e.GID),
+		ModTime: e.Mtime,
+		Format:  tar.FormatPAX,
+	}
+	if hdr.Mode == 0 {
+		hdr.Mode = 0o400
+	}
+	if !e.Atime.IsZero() {
+		hdr.AccessTime = e.Atime
+	}
+	if !e.Ctime.IsZero() {
+		hdr.ChangeTime = e.Ctime
+	}
+	return hdr
+}
+
+// tarNode writes a directory or symlink entry (no body) under its full
+// header: a directory's name carries the trailing slash, a symlink its
+// unfollowed target.
+func tarNode(tw *tar.Writer, e fileEntry, kind string) error {
+	hdr := fullHeader(e)
+	switch kind {
+	case "dir":
+		hdr.Typeflag = tar.TypeDir
+		hdr.Name += "/"
+		if e.Mode&0o7777 == 0 {
+			// no permission bits — a backend that carries no mode, or a
+			// directory a UAC collection only implies (type bits alone):
+			// a directory nobody can enter extracts to nothing
+			hdr.Mode = 0o755
+		}
+	case "symlink":
+		hdr.Typeflag = tar.TypeSymlink
+		hdr.Linkname = e.LinkTarget
+	}
+	hdr.Size = 0
+	return tw.WriteHeader(hdr)
+}
+
+// tarEntry writes one regular file under the given header, the body bounded
+// to the declared size exactly as tarFile does (truncated or zero-padded).
+func tarEntry(tw *tar.Writer, open func() (io.ReadCloser, error), e fileEntry, hdr *tar.Header) (int64, error) {
+	r, err := open()
+	if err != nil {
+		return 0, err
+	}
+	defer r.Close()
+	hdr.Typeflag = tar.TypeReg
+	hdr.Size = e.Size
 	if err := tw.WriteHeader(hdr); err != nil {
 		return 0, err
 	}

@@ -177,7 +177,7 @@ func TestTreeDepth(t *testing.T) {
 
 func TestStreamJSONL(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	sum, err := streamVolume(&out, &errBuf, sampleFS(), "*.exe", true)
+	sum, err := streamVolume(&out, &errBuf, sampleFS(), "*.exe", true, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestStreamJSONL(t *testing.T) {
 
 func TestStreamTar(t *testing.T) {
 	var out, errBuf bytes.Buffer
-	sum, err := streamVolume(&out, &errBuf, sampleFS(), "", false)
+	sum, err := streamVolume(&out, &errBuf, sampleFS(), "", false, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,13 +223,200 @@ func TestStreamPartial(t *testing.T) {
 	// A walkPartial from the backend folds into Errors, not a hard failure.
 	fsys := &partialFS{stubFS: sampleFS(), skipped: 3}
 	var out, errBuf bytes.Buffer
-	sum, err := streamVolume(&out, &errBuf, fsys, "", true)
+	sum, err := streamVolume(&out, &errBuf, fsys, "", true, false)
 	if err != nil {
 		t.Fatalf("partial walk should not be fatal: %v", err)
 	}
 	if sum.Errors != 3 {
 		t.Errorf("errors = %d, want 3", sum.Errors)
 	}
+}
+
+// treeFS wraps stubFS with the treeWalker seam: WalkAll hands out every
+// directory and symlink too, with a POSIX identity on each, the way the
+// fsx backends do.
+type treeFS struct{ *stubFS }
+
+func (f *treeFS) WalkAll(fn func(e fileEntry, open func() (io.ReadCloser, error)) error) error {
+	return f.walkAll("/", fn)
+}
+
+func (f *treeFS) walkAll(dir string, fn func(fileEntry, func() (io.ReadCloser, error)) error) error {
+	for _, e := range f.dirs[dir] {
+		if e.Deleted {
+			continue
+		}
+		child := path.Join(dir, e.Name)
+		e.Path = child
+		if e.IsDir || e.LinkTarget != "" {
+			if err := fn(e, nil); err != nil {
+				return err
+			}
+			if e.IsDir {
+				if err := f.walkAll(child, fn); err != nil {
+					return err
+				}
+			}
+			continue
+		}
+		open := func() (io.ReadCloser, error) { return f.Open(child) }
+		if err := fn(e, open); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// posixFS is sampleFS with a Linux shape: owners, modes, a symlink.
+func posixFS() *treeFS {
+	s := sampleFS()
+	s.dirs["/"] = append(s.dirs["/"],
+		fileEntry{Name: "etc", IsDir: true, Mode: 0o40755, UID: 0, GID: 0, Mtime: mtime, MFTID: "100"},
+		// type bits, no permission bits: a directory a UAC collection only implies
+		fileEntry{Name: "var", IsDir: true, Mode: 0o40000, Mtime: mtime, MFTID: "105"},
+	)
+	s.dirs["/var"] = []fileEntry{
+		{Name: "log", IsDir: true, Mode: 0o40000, Mtime: mtime, MFTID: "106"},
+	}
+	s.dirs["/etc"] = []fileEntry{
+		{Name: "passwd", Size: 6, Mode: 0o100644, UID: 0, GID: 0, Mtime: mtime, Atime: mtime.Add(time.Hour), Ctime: mtime, MFTID: "101"},
+		{Name: "localtime", Mode: 0o120777, LinkTarget: "/usr/share/zoneinfo/UTC", Mtime: mtime, MFTID: "102"},
+		{Name: "secret", Size: 3, Mode: 0o100600, UID: 1000, GID: 1000, Mtime: mtime, MFTID: "103"},
+		{Name: "null", Mode: 0o20666, MFTID: "104"}, // a device node: never streamed
+	}
+	s.files["/etc/passwd"] = []byte("root:x")
+	s.files["/etc/secret"] = []byte("key")
+	return &treeFS{s}
+}
+
+// TestStreamAll: --all carries the whole tree — directories, symlinks and
+// the identity on each entry — where the default stream carries read-only
+// regular files alone.
+func TestStreamAll(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	sum, err := streamVolume(&out, &errBuf, posixFS(), "", false, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]*tar.Header{}
+	tr := tar.NewReader(&out)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		h := *hdr
+		got[hdr.Name] = &h
+	}
+	cases := []struct {
+		name     string
+		typeflag byte
+		mode     int64
+		uid      int
+		link     string
+	}{
+		{"etc/", tar.TypeDir, 0o755, 0, ""},
+		{"etc/passwd", tar.TypeReg, 0o644, 0, ""},
+		{"etc/secret", tar.TypeReg, 0o600, 1000, ""},
+		{"etc/localtime", tar.TypeSymlink, 0o777, 0, "/usr/share/zoneinfo/UTC"},
+		{"Windows/", tar.TypeDir, 0o755, 0, ""}, // no mode on the entry: the enterable default
+		{"var/", tar.TypeDir, 0o755, 0, ""},     // type bits alone (an implied directory): the enterable default
+		{"var/log/", tar.TypeDir, 0o755, 0, ""},
+		{"note.txt", tar.TypeReg, 0o400, 0, ""}, // no mode on the entry: the read-only default
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			h, ok := got[c.name]
+			if !ok {
+				t.Fatalf("entry missing; have %v", keys(got))
+			}
+			if h.Typeflag != c.typeflag || h.Mode != c.mode || h.Uid != c.uid || h.Linkname != c.link {
+				t.Errorf("header = type %q mode %o uid %d link %q, want type %q mode %o uid %d link %q",
+					h.Typeflag, h.Mode, h.Uid, h.Linkname, c.typeflag, c.mode, c.uid, c.link)
+			}
+		})
+	}
+	if _, ok := got["etc/null"]; ok {
+		t.Error("a device node was streamed")
+	}
+	if h := got["etc/passwd"]; h.AccessTime.IsZero() || h.Format != tar.FormatPAX {
+		t.Errorf("the access time did not ride a PAX header: %+v", h)
+	}
+	// the summary counts files alone — the tree around them is structure
+	if sum.Files != 5 {
+		t.Errorf("files = %d, want 5", sum.Files)
+	}
+	// the default stream is unchanged: no directory, no symlink, mode 0400
+	out.Reset()
+	if _, err := streamVolume(&out, &errBuf, posixFS(), "", false, false); err != nil {
+		t.Fatal(err)
+	}
+	tr = tar.NewReader(&out)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hdr.Typeflag != tar.TypeReg || hdr.Mode != 0o400 || hdr.Uid != 0 {
+			t.Errorf("default stream entry %s: type %q mode %o uid %d", hdr.Name, hdr.Typeflag, hdr.Mode, hdr.Uid)
+		}
+	}
+}
+
+// TestStreamAllFilterKeepsTheTree: a filter narrows the files, never the
+// directories they hang in, so the extract still lands in place.
+func TestStreamAllFilterKeepsTheTree(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	sum, err := streamVolume(&out, &errBuf, posixFS(), "passwd", true, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.Files != 1 {
+		t.Errorf("files = %d, want 1", sum.Files)
+	}
+	var kinds []string
+	for _, line := range strings.Split(strings.TrimSpace(out.String()), "\n") {
+		var rec streamRecord
+		if err := json.Unmarshal([]byte(line), &rec); err != nil {
+			t.Fatal(err)
+		}
+		kinds = append(kinds, rec.Path+":"+rec.Type)
+		if rec.Path == "/etc/localtime" && rec.LinkTarget != "/usr/share/zoneinfo/UTC" {
+			t.Errorf("symlink row lost its target: %+v", rec)
+		}
+	}
+	want := "/Windows:dir"
+	if !strings.Contains(strings.Join(kinds, " "), want) || !strings.Contains(strings.Join(kinds, " "), "/etc/passwd:") {
+		t.Errorf("rows = %v", kinds)
+	}
+	for _, k := range kinds {
+		if strings.HasSuffix(k, "cmd.exe:") {
+			t.Errorf("a filtered-out file was streamed: %v", kinds)
+		}
+	}
+}
+
+// TestStreamAllNeedsTheTreeSeam: a backend without WalkAll (NTFS) refuses
+// --all instead of silently streaming files alone.
+func TestStreamAllNeedsTheTreeSeam(t *testing.T) {
+	var out, errBuf bytes.Buffer
+	if _, err := streamVolume(&out, &errBuf, sampleFS(), "", false, true); err == nil {
+		t.Fatal("--all accepted on a files-only backend")
+	}
+}
+
+func keys(m map[string]*tar.Header) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
 }
 
 // partialFS wraps stubFS to return a walkPartial after a clean walk.
