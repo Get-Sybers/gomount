@@ -14,7 +14,11 @@ description: >
   xattrs, decmpfs) through one resolved volume stack: partitions (MBR,
   GPT, Apple Partition Map), LVM2 volume groups (--lv vg/lv), the volumes
   of an APFS container (<partition>/apfsN), or a bare whole-disk
-  filesystem (docs/linux §5). A declared argv deviation: its
+  filesystem (docs/linux §5) — and a UAC (Unix-like Artifacts Collector)
+  collection, the tar.gz/tar/zip the collector writes, detected by content
+  and resolved as two volumes: [root], the host's files at their own paths
+  (what every artefact set and read verb reads, as off a disk image's root
+  volume), and uac, the collector's own output. A declared argv deviation: its
   verbs are streaming and interactive (stream a tar of every file to
   stdout for a consuming tool, materialise artefact sets into a directory
   — windows-core, linux-core and macos-core included, with the origin-record manifest
@@ -60,9 +64,9 @@ summary_schema:
     one stderr summary line.
 
 outputs:
-  stream: "stdout: a tar archive, one regular-file entry per volume file (entry name = the file's volume path), or one JSON object per file with --jsonl"
+  stream: "stdout: a tar archive, one regular-file entry per volume file (entry name = the file's volume path; with --all every entry — directories and symlinks too — carrying uid/gid/mode and the access/change times, so the tar extracts into a browsable root), or one JSON object per file with --jsonl"
   materialise: "<out>/<volume-path> at mode 0400 per pulled file (+ named siblings with --siblings), residue/<kind>/<id>/<volume-path> with --residue, <out>/materialise.jsonl with --manifest (the done marker a lane gates on); stdout: the one summary line"
-  identify: "stdout: ONE JSON document — image, partitions, LVM findings, every volume's fstype/UUID/label/OS guess, snapshot inventory (P3, empty until then)"
+  identify: "stdout: ONE JSON document — image, partitions, LVM findings, every volume's fstype/UUID/label/OS guess, snapshot inventory (P3, empty until then); for a UAC collection a `collection` block (tool, version, container, hostname, os, arch, timezone, mount_point, started, finished, command_line, member counts, truncated) and the two volumes [root] (fstype uac) and uac (fstype uac-meta)"
   timeline: "stdout: one JSONL row per (file, timestamp kind) with allocation state (--residue adds recovered rows, --hash content digests); stderr: one summary line"
   mount: "a read-only NTFS mount at --mount-point (default /mnt/ntfs) held in the foreground until umount"
 
@@ -71,7 +75,7 @@ hardening:
   justification: "the runtime is debian:trixie-slim with ntfs-3g + fuse3 (the mount verb execs the distro ntfs-3g and fusermount3, never links libntfs-3g); sh stays with it, python and the package manager are removed and every setuid bit is stripped; the Go binary itself is static"
 
 argv_passthrough: >
-  gomount stream [--jsonl] [--filter GLOB] [--volume N | --lv vg/lv] <image> |
+  gomount stream [--jsonl] [--all] [--filter GLOB] [--volume N | --lv vg/lv] <image> |
   gomount materialise --out DIR [--set NAME]... [--select GLOB]... [--siblings] [--manifest] [--max-file-size N] [--residue] [--volume N | --lv vg/lv] <image> |
   gomount identify <image> |
   gomount timeline [--volume N | --lv vg/lv] [--residue] [--hash] <image> |

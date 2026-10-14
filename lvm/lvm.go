@@ -150,6 +150,11 @@ type VG struct {
 	LVs        []LV
 	pvs        map[string]pvRef // metadata pv name ("pv0") -> located PV
 	Missing    []string         // pv names the image did not provide
+	// Short names the PVs the image holds LESS of than their metadata
+	// declares (pe_start + pe_count extents past the volume's end): a
+	// truncated capture, or a PV grown after the image was taken. The LVs
+	// still assemble; a read mapped beyond the present bytes fails.
+	Short []string
 }
 
 type pvRef struct {
@@ -253,6 +258,13 @@ func buildVG(name, text string, found []*PV) (*VG, error) {
 			continue
 		}
 		vg.pvs[pvName] = pvRef{pv: pv, peStart: peStart * sector}
+		// pe_count is informational to the mapping (segments place the
+		// extents), but it says how much PV the metadata expects to exist
+		if peCount, err := ps.int("pe_count"); err == nil && peCount > 0 {
+			if declared := peStart*sector + peCount*vg.ExtentSize; declared > pv.Size {
+				vg.Short = append(vg.Short, fmt.Sprintf("%s: metadata declares %d bytes, the image holds %d", pvName, declared, pv.Size))
+			}
+		}
 	}
 
 	lvsSec := vgSec.section("logical_volumes")
@@ -395,7 +407,7 @@ func boundedRead(ra io.ReaderAt, pvSize, pvOff int64, p []byte, run int64) (int,
 		run = int64(len(p))
 	}
 	if pvOff < 0 || pvOff+run > pvSize {
-		return 0, fmt.Errorf("lvm: mapped read outside its PV")
+		return 0, fmt.Errorf("lvm: mapped read outside its PV (%d bytes at %d, PV holds %d: a truncated capture?)", run, pvOff, pvSize)
 	}
 	return io.NewSectionReader(ra, pvOff, run).Read(p[:run])
 }
@@ -605,13 +617,35 @@ func (p *parser) value() (any, error) {
 func (p *parser) quoted() (string, error) {
 	p.pos++ // opening quote
 	start := p.pos
-	for p.pos < len(p.s) && p.s[p.pos] != '"' {
-		p.pos++
+	var b strings.Builder
+	for p.pos < len(p.s) {
+		switch p.s[p.pos] {
+		case '"':
+			if b.Len() == 0 {
+				s := p.s[start:p.pos]
+				p.pos++
+				return s, nil
+			}
+			b.WriteString(p.s[start:p.pos])
+			p.pos++
+			return b.String(), nil
+		case '\\':
+			if p.pos+1 >= len(p.s) {
+				return "", fmt.Errorf("unterminated string")
+			}
+			b.WriteString(p.s[start:p.pos])
+			next := p.s[p.pos+1]
+			if next == '"' || next == '\\' {
+				b.WriteByte(next)
+			} else {
+				b.WriteByte('\\')
+				b.WriteByte(next)
+			}
+			p.pos += 2
+			start = p.pos
+		default:
+			p.pos++
+		}
 	}
-	if p.pos >= len(p.s) {
-		return "", fmt.Errorf("unterminated string")
-	}
-	s := p.s[start:p.pos]
-	p.pos++
-	return s, nil
+	return "", fmt.Errorf("unterminated string")
 }
