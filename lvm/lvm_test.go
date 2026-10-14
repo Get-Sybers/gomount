@@ -200,3 +200,70 @@ seqno = 2
 		t.Fatalf("seqno after escaped string: %d", seqno)
 	}
 }
+
+// TestBuildVGShortPV: metadata that places more extents on a PV than the
+// volume holds (a truncated capture — the Fedora image of gomount#7, 2.9 GB
+// of a 15 GB disk) still assembles, names the short PV, and a read mapped
+// past the present bytes says so instead of returning garbage.
+func TestBuildVGShortPV(t *testing.T) {
+	text := `fedora {
+id = "Mi8lcZ-aRx2-aIvu-DR0T-OBLS-YKaz-DHxVNz"
+seqno = 2
+extent_size = 8192
+physical_volumes {
+pv0 {
+id = "PZjskJ-Xf4v-FI4Y-DzP3-HGq9-eECT-MhuFWJ"
+pe_start = 2048
+pe_count = 3878
+}
+}
+logical_volumes {
+root {
+id = "d4lqoF-MYFi-eJS6-ku4y-1C0f-5cOZ-MLgdEm"
+segment_count = 1
+segment1 {
+start_extent = 0
+extent_count = 3878
+type = "striped"
+stripe_count = 1
+stripes = [
+"pv0", 0
+]
+}
+}
+}
+}
+`
+	const present = int64(3066257408) // what the image holds of p3
+	pv := &PV{UUID: "PZjskJXf4vFI4YDzP3HGq9eECTMhuFWJ", Size: present, ra: io.NewSectionReader(strings.NewReader(strings.Repeat("x", 4096)), 0, 4096)}
+	vg, err := buildVG("fedora", text, []*PV{pv})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vg.Short) != 1 || !strings.HasPrefix(vg.Short[0], "pv0: metadata declares 16266559488 bytes, the image holds 3066257408") {
+		t.Fatalf("Short = %v", vg.Short)
+	}
+	if len(vg.Missing) != 0 {
+		t.Fatalf("a short PV is present, not missing: %v", vg.Missing)
+	}
+	ra, size, err := vg.Reader(vg.LVs[0])
+	if err != nil {
+		t.Fatalf("the LV still assembles: %v", err)
+	}
+	if size != 3878*4194304 {
+		t.Fatalf("lv size = %d", size)
+	}
+	buf := make([]byte, 16)
+	if _, err := ra.ReadAt(buf, present); err == nil || !strings.Contains(err.Error(), "truncated capture") {
+		t.Fatalf("read past the present bytes: %v", err)
+	}
+	// a VG whose PVs are whole names nothing
+	pv.Size = 16265510912
+	vg, err = buildVG("fedora", text, []*PV{pv})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vg.Short) != 0 {
+		t.Fatalf("Short on a whole PV: %v", vg.Short)
+	}
+}

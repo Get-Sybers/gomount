@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 
 	"github.com/Get-Sybers/gomount/fsx"
 	"github.com/Get-Sybers/gomount/fsx/apfs"
@@ -159,6 +160,10 @@ func resolveVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) 
 					v.FSType = "ntfs"
 				} else {
 					v.FSType = fsx.Probe(lvRA, lvSize)
+				}
+				if len(vg.Short) > 0 {
+					v.Note = "the image holds less of this VG's PV(s) than the metadata declares (" +
+						strings.Join(vg.Short, "; ") + "): a truncated capture — reads mapped past the present bytes fail"
 				}
 			}
 			vols = append(vols, v)

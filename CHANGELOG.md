@@ -6,7 +6,26 @@ All notable changes are documented here, following
 
 ## [Unreleased]
 
+### Fixed
+- **Fedora/RHEL volume groups assemble.** The LVM2 metadata text parser
+  honours the two escapes LVM writes inside quoted strings (`\"` and `\\`),
+  so a VG whose `description` carries an escaped `--config` argument — every
+  anaconda-made VG — parses instead of stopping at the first `\"`
+  (`expected identifier`), and its LVs appear in `identify` and the volume
+  stack (#7).
+- **A PV whose metadata fails to parse is no longer dropped silently.** The
+  volume stays in the resolved stack as `lvm2-pv` and `identify` carries the
+  probe error on its `note`, where the stack used to look healthy with the
+  root volume missing.
+
 ### Added
+- **`identify` names a truncated capture.** When a VG's metadata places more
+  extents on a PV than the image holds (the Fedora image of #7 is 2.9 GB of a
+  15 GB disk), the VG reports the PV under `lvm.vgs[].short_pvs`, each of its
+  LVs carries a `note` saying reads past the present bytes will fail, and the
+  read error itself says so (`… PV holds N: a truncated capture?`) instead of
+  a bare "mapped read outside its PV". The LVs still assemble: what the image
+  holds reads.
 - The conformance gate of the get-sybers standard (DX_DFIR
   `docs/reference/build-and-test.md`): `make conform` (gofmt, vet, build,
   shuffled tests with coverage, `go mod tidy -diff`, a `go:generate` drift

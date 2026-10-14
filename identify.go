@@ -50,6 +50,7 @@ type identifyVG struct {
 	UUID       string       `json:"uuid"`
 	ExtentSize int64        `json:"extent_size"`
 	MissingPVs []string     `json:"missing_pvs,omitempty"`
+	ShortPVs   []string     `json:"short_pvs,omitempty"` // PVs the image holds less of than the metadata declares (a truncated capture)
 	LVs        []identifyLV `json:"lvs"`
 }
 
@@ -146,7 +147,7 @@ func identifyImageFile(path string) (*identifyDoc, error) {
 		for _, vg := range vgs {
 			ivg := identifyVG{
 				Name: vg.Name, UUID: vg.UUID, ExtentSize: vg.ExtentSize,
-				MissingPVs: vg.Missing,
+				MissingPVs: vg.Missing, ShortPVs: vg.Short,
 			}
 			for _, lv := range vg.LVs {
 				ivg.LVs = append(ivg.LVs, identifyLV{
