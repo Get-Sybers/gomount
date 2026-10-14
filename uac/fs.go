@@ -148,8 +148,23 @@ type FS struct {
 	label string
 }
 
-// Info names the backend; a collection carries no filesystem UUID or label.
-func (f *FS) Info() fsx.Info { return fsx.Info{Type: "uac"} }
+// FSTypeRoot and FSTypeMeta are what identify, timeline and the volume
+// stack call a collection's two volumes: the host's tree and the
+// collector's output.
+const (
+	FSTypeRoot = "uac"
+	FSTypeMeta = "uac-meta"
+)
+
+// Info names the backend — the host's tree `uac`, the collector's output
+// `uac-meta`, the names identify gives the two volumes, so a timeline row
+// says which it came from; a collection carries no filesystem UUID or label.
+func (f *FS) Info() fsx.Info {
+	if f.label == "meta" {
+		return fsx.Info{Type: FSTypeMeta}
+	}
+	return fsx.Info{Type: FSTypeRoot}
+}
 
 // ReadDir lists a directory, sorted by name.
 func (f *FS) ReadDir(dir string) ([]fsx.Entry, error) {

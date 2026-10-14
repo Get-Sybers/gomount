@@ -67,9 +67,9 @@ func collectionVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, erro
 		what += " (UAC " + lg.Version + ")"
 	}
 	return []volumeRef{
-		{Index: 1, Source: "[root]", Size: size, FSType: "uac", ra: ra,
+		{Index: 1, Source: "[root]", Size: size, FSType: uac.FSTypeRoot, ra: ra,
 			TypeName: what + ": the host's files", collection: a, collectionPart: "root"},
-		{Index: 2, Source: "uac", Size: size, FSType: "uac-meta", ra: ra,
+		{Index: 2, Source: "uac", Size: size, FSType: uac.FSTypeMeta, ra: ra,
 			TypeName:   what + ": the collector's output (uac.log, bodyfile/, hash_executables/, live_response/, …)",
 			collection: a, collectionPart: "meta"},
 	}, nil, nil
@@ -299,7 +299,7 @@ func selectVolume(vols []volumeRef, volume int, lvName string) (volumeRef, error
 		return vols[volume-1], nil
 	}
 	for _, v := range vols { // 0: a UAC collection — the host's files are the volume
-		if v.FSType == "uac" {
+		if v.FSType == uac.FSTypeRoot {
 			return v, nil
 		}
 	}
@@ -366,7 +366,7 @@ func openRef(v volumeRef) (volumeFS, fsx.FS, func(), error) {
 		return nil, nil, nil, fmt.Errorf("an LVM2 PV holds no filesystem itself — address its LVs with --lv vg/lv")
 	case "apfs-container":
 		return nil, nil, nil, fmt.Errorf("an APFS container holds volumes — address one with --volume N (identify lists them as <partition>/apfs<N>)")
-	case "uac", "uac-meta":
+	case uac.FSTypeRoot, uac.FSTypeMeta:
 		if v.collection == nil {
 			return nil, nil, nil, fmt.Errorf("collection volume without its archive")
 		}

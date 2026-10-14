@@ -606,6 +606,11 @@ func (p *parser) value() (any, error) {
 		}
 	default:
 		tok := p.ident()
+		if tok == "" {
+			// a stray `}`, `{` or `=` where a value belongs: without this
+			// the list loop would re-read the same byte forever
+			return nil, fmt.Errorf("expected value at %d", p.pos)
+		}
 		iv, err := strconv.ParseInt(tok, 10, 64)
 		if err != nil {
 			return tok, nil // bare word (status flags etc.)
