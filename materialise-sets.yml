@@ -122,6 +122,7 @@ sets:
       - 'etc/systemd/**'
       - 'etc/os-release'
       - 'usr/lib/os-release'
+      - 'etc/lsb-release'
       - 'etc/hostname'
       - 'etc/hosts'
       - 'etc/fstab'

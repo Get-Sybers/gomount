@@ -61,6 +61,32 @@ filesystem surfaces as a Go error rather than a kernel fault, and the
 backend runs anywhere a Go binary runs, including containers with no
 `/dev/fuse`.
 
+A **UAC collection** reads as an image too. The Unix-like Artifacts
+Collector ([tclahr/uac](https://github.com/tclahr/uac)) writes one archive
+per host — `uac-<hostname>-<os>-<timestamp>.tar.gz` (a plain `.tar` where
+the host has no gzip) or `.zip` — holding the host's files under `[root]/`
+with their paths intact and the collector's own output beside them
+(`uac.log`, `bodyfile/`, `hash_executables/`, `live_response/`, …). gomount
+detects the collection by content (the container's magic, then UAC's layout:
+`uac.log` among the first members or a `[root]/` member — never by name)
+and resolves it as a two-volume stack: volume 1, `[root]`, is the host's
+files at their own paths, so `--volume 0` picks it and every read verb and
+artefact set that reads a disk image's root volume reads the collection
+unchanged (`materialise --set linux-core` stages `/etc/passwd`, `/var/log/**`
+and the rest exactly as off an ext4 root; `identify` adds a `collection`
+block from `uac.log` — UAC version, hostname, OS, time zone, mount point,
+acquisition start/finish, the command line — and names the volumes); volume
+2, `uac`, is the collector's output. A zip and a plain tar read in place; a
+gzip'd tar is decompressed once into an unlinked spool under the temp dir
+(`TMPDIR`), so point that at a disk-backed directory for a large collection.
+Symlinks keep their targets in a tar collection (`gomount stat` shows them,
+`cat` returns the target text, the icat precedent); UAC's zip output
+dereferences symlinks at collection time (Info-ZIP without `-y`), so a zip
+collection carries their targets' content, or nothing where a target lay
+outside the mount point. An interrupted collection indexes as far as it
+goes, and `identify` says so (`collection.truncated`). The package is
+[`uac`](uac).
+
 ```
 gomount ls     <image> [path]      list a directory (default: the volume root)
 gomount cat    <image> <path>      write a file's bytes to stdout
@@ -69,9 +95,20 @@ gomount tree   <image> [path]      list a subtree
 gomount browse <image>             navigate the volume interactively
 gomount identify <image>           print the resolved volume stack as JSON
 gomount timeline <image>           one JSONL row per (file, timestamp kind)
-gomount stream [--jsonl] <image>   walk the whole filesystem for tools
+gomount stream [--jsonl] [--all] <image>   walk the whole filesystem for tools
 gomount materialise --out DIR [--set NAME]... [--select GLOB]... [--siblings] [--manifest] <image>
 ```
+
+`stream` writes one tar entry per regular file (mode `0400`, the mtime
+alone) — the pipe the go* tools' `--tar` mode consumes. `stream --all`
+writes the **whole tree**: directories and symlinks too, every entry
+carrying the volume's own uid, gid, mode and access/change times (PAX),
+so `gomount stream --all image | tar -x` extracts into a browsable root the
+way a mount would present it — what an offline collector such as UAC's
+`--mount-point` mode is pointed at (DX_DFIR builds its UAC collections this
+way). The Linux and Mac filesystems carry the identity; NTFS, which has no
+POSIX identity, refuses `--all` rather than pretend. A `--filter` under
+`--all` narrows the files and never the directories they hang in.
 
 `materialise` copies targeted artefacts out of the volume into a real directory,
 so a downstream tool consumes them from a plain `-d <dir>`. `--set` names a

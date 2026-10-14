@@ -226,7 +226,8 @@ func ewfSegments(path string) ([]string, error) {
 
 // Format labels the image container by its content: "e01", "dmg",
 // "sparseimage", "sparsebundle", "encrypted-dmg", "vmdk", "vhdx", "vhd",
-// "qcow2", "vdi" or "raw" (anything else, a mislabelled name included — an
+// "qcow2", "vdi", the archive containers "zip", "gzip" and "tar" (a UAC
+// collection), or "raw" (anything else, a mislabelled name included — an
 // uncompressed .dmg with no koly trailer is a raw image).
 func Format(path string) string {
 	f, err := os.Open(path)
@@ -270,5 +271,25 @@ func Format(path string) string {
 	if statErr == nil && looksLikeVHD(f, st.Size()) {
 		return "vhd"
 	}
+	// the archive containers a collection comes in (a UAC collection is an
+	// archive of a host's files; the uac package reads its layout)
+	switch {
+	case n >= 4 && bytes.Equal(hdr[:4], []byte{'P', 'K', 3, 4}):
+		return "zip"
+	case n >= 2 && hdr[0] == 0x1f && hdr[1] == 0x8b:
+		return "gzip"
+	case statErr == nil && looksLikeTar(f, st.Size()):
+		return "tar"
+	}
 	return "raw" // a name alone never decides: a mislabelled raw stays raw
+}
+
+// looksLikeTar reports the ustar magic at byte 257 of the first header.
+func looksLikeTar(f io.ReaderAt, size int64) bool {
+	if size < 512 {
+		return false
+	}
+	var magic [5]byte
+	n, _ := f.ReadAt(magic[:], 257)
+	return n == 5 && string(magic[:]) == "ustar"
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/Get-Sybers/gomount/ntfsfs"
 	"github.com/Get-Sybers/gomount/ntfsvol"
 	"github.com/Get-Sybers/gomount/partition"
+	"github.com/Get-Sybers/gomount/uac"
 )
 
 // volumeRef is one addressable volume of the resolved stack.
@@ -39,6 +40,51 @@ type volumeRef struct {
 	// an APFS volume: its 1-based index in the container the ra spans, and its role
 	apfsIndex int
 	apfsRole  string
+	// a UAC collection (uac.Detect): the opened archive both of its volumes
+	// share, and which tree this one is — "root" ([root]/, the host's files)
+	// or "meta" (the collector's own output)
+	collection     *uac.Archive
+	collectionPart string
+}
+
+// collectionVolumes peels a UAC collection into its two volumes: the
+// host's files under [root]/ — the root volume every verb and artefact set
+// reads exactly as it reads a disk image's — and the collector's own
+// output beside them (uac.log, bodyfile/, hash_executables/,
+// live_response/, …). The archive is not media: there are no partitions,
+// no LVM, and both volumes span the archive.
+func collectionVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) {
+	a, err := uac.Open(ra, size)
+	if err != nil {
+		return nil, nil, err
+	}
+	lg := a.Log()
+	what := "UAC collection"
+	if lg.Hostname != "" {
+		what += " of " + lg.Hostname
+	}
+	if lg.Version != "" {
+		what += " (UAC " + lg.Version + ")"
+	}
+	return []volumeRef{
+		{Index: 1, Source: "[root]", Size: size, FSType: "uac", ra: ra,
+			TypeName: what + ": the host's files", collection: a, collectionPart: "root"},
+		{Index: 2, Source: "uac", Size: size, FSType: "uac-meta", ra: ra,
+			TypeName:   what + ": the collector's output (uac.log, bodyfile/, hash_executables/, live_response/, …)",
+			collection: a, collectionPart: "meta"},
+	}, nil, nil
+}
+
+// closeCollections releases the archive(s) a resolved stack opened — one
+// per collection, shared by its volumes.
+func closeCollections(vols []volumeRef) {
+	seen := map[*uac.Archive]bool{}
+	for _, v := range vols {
+		if v.collection != nil && !seen[v.collection] {
+			seen[v.collection] = true
+			_ = v.collection.Close()
+		}
+	}
 }
 
 // apfsVolumes peels an APFS container into its volumes: the container's own
@@ -74,6 +120,12 @@ func apfsVolumes(container volumeRef) []volumeRef {
 func resolveVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) {
 	var vols []volumeRef
 	var pvs []*lvm.PV
+
+	// A UAC collection is an archive of a host's files, not media: its two
+	// trees are the whole stack (docs/linux §5.2's layer, peeled by content).
+	if _, ok := uac.Detect(ra, size); ok {
+		return collectionVolumes(ra, size)
+	}
 
 	// Superfloppy first, the same reasoning as partition.go's NTFS rule:
 	// a partitionless vfat volume ends in the very 0x55AA an MBR does, so
@@ -221,6 +273,7 @@ func openVolume(imgPath string, volume int, lvName string) (volumeFS, fsx.FS, vo
 		if release != nil {
 			release()
 		}
+		closeCollections(vols)
 		return closeImage()
 	}
 	return fsys, raw, sel, closer, nil
@@ -244,6 +297,11 @@ func selectVolume(vols []volumeRef, volume int, lvName string) (volumeRef, error
 			return volumeRef{}, fmt.Errorf("volume %d out of range (%d resolved)", volume, len(vols))
 		}
 		return vols[volume-1], nil
+	}
+	for _, v := range vols { // 0: a UAC collection — the host's files are the volume
+		if v.FSType == "uac" {
+			return v, nil
+		}
 	}
 	best := -1
 	for i, v := range vols { // 1: the Windows rule — largest NTFS
@@ -308,6 +366,15 @@ func openRef(v volumeRef) (volumeFS, fsx.FS, func(), error) {
 		return nil, nil, nil, fmt.Errorf("an LVM2 PV holds no filesystem itself — address its LVs with --lv vg/lv")
 	case "apfs-container":
 		return nil, nil, nil, fmt.Errorf("an APFS container holds volumes — address one with --volume N (identify lists them as <partition>/apfs<N>)")
+	case "uac", "uac-meta":
+		if v.collection == nil {
+			return nil, nil, nil, fmt.Errorf("collection volume without its archive")
+		}
+		var fsys fsx.FS = v.collection.Root()
+		if v.collectionPart == "meta" {
+			fsys = v.collection.Meta()
+		}
+		return fsxFS{fs: fsys}, fsys, nil, nil
 	case "apfs":
 		c, err := apfs.OpenContainer(v.ra, v.Size)
 		if err != nil {

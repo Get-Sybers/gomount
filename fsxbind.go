@@ -27,7 +27,7 @@ func fsxEntryToFile(e fsx.Entry) fileEntry {
 		Path:       e.Path,
 		IsDir:      e.IsDir,
 		Size:       e.Size,
-		MFTID:      strconv.FormatUint(e.Inode, 10),
+		MFTID:      inodeID(e.Inode),
 		Deleted:    !e.Allocated,
 		Btime:      e.Btime,
 		Mtime:      e.Mtime,
@@ -40,6 +40,16 @@ func fsxEntryToFile(e fsx.Entry) fileEntry {
 		Nlink:      e.Nlink,
 		LinkTarget: e.LinkTarget,
 	}
+}
+
+// inodeID renders the backend's inode as the identity column, or "" when
+// the backend has none (an archive's members carry no inode): an honest
+// null, never a fabricated 0.
+func inodeID(inode uint64) string {
+	if inode == 0 {
+		return ""
+	}
+	return strconv.FormatUint(inode, 10)
 }
 
 func (a fsxFS) ReadDir(dir string) ([]fileEntry, error) {
@@ -69,6 +79,15 @@ func (a fsxFS) Walk(fn func(e fileEntry, open func() (io.ReadCloser, error)) err
 		if open == nil {
 			return nil // directories and symlinks: not stream/materialise material
 		}
+		return fn(fsxEntryToFile(e), open)
+	})
+}
+
+// WalkAll is the treeWalker seam of `stream --all`: every entry the backend
+// has — directories and symlinks with a nil opener — in the backend's
+// depth-first order.
+func (a fsxFS) WalkAll(fn func(e fileEntry, open func() (io.ReadCloser, error)) error) error {
+	return a.fs.Walk(func(e fsx.Entry, open func() (io.ReadCloser, error)) error {
 		return fn(fsxEntryToFile(e), open)
 	})
 }
