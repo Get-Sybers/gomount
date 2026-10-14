@@ -60,7 +60,8 @@ All notable changes are documented here, following
   LVs carries a `note` saying reads past the present bytes will fail, and the
   read error itself says so (`… PV holds N: a truncated capture?`) instead of
   a bare "mapped read outside its PV". The LVs still assemble: what the image
-  holds reads.
+  holds reads. An LV of such a VG that does not probe as a filesystem keeps
+  that note beside `no recognised filesystem` in `identify`, not under it.
 - The conformance gate of the get-sybers standard (DX_DFIR
   `docs/reference/build-and-test.md`): `make conform` (gofmt, vet, build,
   shuffled tests with coverage, `go mod tidy -diff`, a `go:generate` drift

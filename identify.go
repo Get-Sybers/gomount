@@ -166,7 +166,9 @@ func identifyImageFile(path string) (*identifyDoc, error) {
 			iv.OS = "windows"
 		}
 		if v.FSType == "" && v.ra != nil {
-			iv.Note = "no recognised filesystem"
+			// beside the stack's own note (a truncated capture, a failed
+			// PV probe), never over it
+			iv.Note = joinNotes("no recognised filesystem", v.Note)
 		}
 		doc.Volumes = append(doc.Volumes, iv)
 	}
@@ -274,3 +276,14 @@ func osGuess(fsys fsx.FS) string {
 
 // sniffFormat labels the image container by its content (image.Format).
 func sniffFormat(path string) string { return image.Format(path) }
+
+// joinNotes puts two notes on one line; an empty one is dropped.
+func joinNotes(a, b string) string {
+	switch {
+	case a == "":
+		return b
+	case b == "":
+		return a
+	}
+	return a + "; " + b
+}

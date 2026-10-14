@@ -250,7 +250,7 @@ func (a *Archive) spoolAndIndex(ra io.ReaderAt, size int64) error {
 		return fmt.Errorf("uac: gzip: %w", err)
 	}
 	defer zr.Close()
-	spool, err := os.CreateTemp("", "gomount-uac-*.tar")
+	spool, err := spoolTemp()
 	if err != nil {
 		return fmt.Errorf("uac: spool: %w", err)
 	}
@@ -261,15 +261,60 @@ func (a *Archive) spoolAndIndex(ra io.ReaderAt, size int64) error {
 	if rerr := os.Remove(spool.Name()); rerr != nil {
 		a.spoolName = spool.Name()
 	}
-	n, err := io.Copy(spool, zr)
-	if err != nil && n == 0 {
-		return fmt.Errorf("uac: gunzip: %w", err)
+	n, readErr, writeErr := spoolCopy(spool, zr)
+	if writeErr != nil {
+		// the spool, not the evidence — a full or unwritable TMPDIR. Never
+		// a "truncated collection": that would pass a partial index off as
+		// the archive's own state, and materialise would exit 0 with
+		// members missing.
+		return fmt.Errorf("uac: spool: %w", writeErr)
 	}
-	if err != nil {
+	if readErr != nil && n == 0 {
+		return fmt.Errorf("uac: gunzip: %w", readErr)
+	}
+	if readErr != nil {
 		// a truncated gzip stream: index what decompressed
-		a.truncated = fmt.Errorf("gzip stream ends early: %w", err)
+		a.truncated = fmt.Errorf("gzip stream ends early: %w", readErr)
 	}
 	return a.indexTar(io.NewSectionReader(spool, 0, n), n)
+}
+
+// spoolTemp opens the spool under TMPDIR; a test hands in an unwritable one.
+var spoolTemp = func() (*os.File, error) { return os.CreateTemp("", "gomount-uac-*.tar") }
+
+// spoolCopy copies the gunzipped stream into the spool and keeps the two
+// ways it can stop apart — io.Copy folds them into one error: a read error
+// is the evidence (the gzip stream ends early, a checksum fails), a write
+// error is the spool (TMPDIR full, unwritable).
+func spoolCopy(dst io.Writer, src io.Reader) (n int64, readErr, writeErr error) {
+	buf := make([]byte, 256<<10)
+	for {
+		nr, er := src.Read(buf)
+		if nr > 0 {
+			nw, ew := dst.Write(buf[:nr])
+			n += int64(nw)
+			if ew != nil {
+				return n, nil, ew
+			}
+			if nw != nr {
+				return n, nil, io.ErrShortWrite
+			}
+		}
+		if er != nil {
+			if errors.Is(er, io.EOF) {
+				return n, nil, nil
+			}
+			return n, er, nil
+		}
+	}
+}
+
+// note records why the index stopped early, keeping the first cause: a
+// gzip stream that ends early makes its tar end early too.
+func (a *Archive) note(err error) {
+	if a.truncated == nil {
+		a.truncated = err
+	}
 }
 
 // indexTar walks the tar once, recording where each member's data starts
@@ -287,7 +332,7 @@ func (a *Archive) indexTar(src *io.SectionReader, size int64) error {
 			if a.root.n+a.meta.n == 0 {
 				return fmt.Errorf("uac: tar: %w", err)
 			}
-			a.truncated = fmt.Errorf("tar ends early at member %d: %w", a.root.n+a.meta.n, err)
+			a.note(fmt.Errorf("tar ends early at member %d: %w", a.root.n+a.meta.n, err))
 			break
 		}
 		dataOff := cr.n
@@ -309,7 +354,7 @@ func (a *Archive) indexTar(src *io.SectionReader, size int64) error {
 			m.typ = typeFile
 			if dataOff+hdr.Size > size {
 				m.size = max(size-dataOff, 0) // what the archive still holds
-				a.truncated = fmt.Errorf("tar ends inside %s", hdr.Name)
+				a.note(fmt.Errorf("tar ends inside %s", hdr.Name))
 			}
 			off, n := dataOff, m.size
 			m.open = func() (io.ReadCloser, error) {
