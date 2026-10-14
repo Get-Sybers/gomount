@@ -33,6 +33,7 @@ type volumeRef struct {
 	Size     int64
 	FSType   string // "ntfs", "ext4", "ext3", "ext2", "xfs", "vfat", "apfs", "apfs-container", "lvm2-pv", or ""
 	TypeName string // partition-table label, or "LVM2 logical volume", or the APFS volume's name and role
+	Note     string
 	ra       io.ReaderAt
 	// an APFS volume: its 1-based index in the container the ra spans, and its role
 	apfsIndex int
@@ -78,12 +79,16 @@ func resolveVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) 
 	// a recognised whole-disk filesystem (or PV label) outranks whatever
 	// the boot-code bytes would parse to as a partition table.
 	whole := io.NewSectionReader(ra, 0, size)
-	if lvm.IsPV(whole, size) {
+	wholePV := lvm.IsPV(whole, size)
+	if wholePV {
+		v := volumeRef{Source: "disk", Size: size,
+			FSType: "lvm2-pv", TypeName: "LVM2 PV (whole disk)", ra: whole}
 		if pv, perr := lvm.ProbePV(whole, size, 0); perr == nil {
 			pvs = append(pvs, pv)
-			vols = append(vols, volumeRef{Source: "disk", Size: size,
-				FSType: "lvm2-pv", TypeName: "LVM2 PV (whole disk)", ra: whole})
+		} else {
+			v.Note = "LVM2 PV metadata probe failed: " + perr.Error()
 		}
+		vols = append(vols, v)
 	} else if t := fsx.Probe(whole, size); t != "" {
 		v := volumeRef{Source: "disk", Size: size, FSType: t, TypeName: t + " (whole disk, partitionless)", ra: whole}
 		if t == "apfs" {
@@ -98,7 +103,7 @@ func resolveVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) 
 	}
 
 	var parts []partition.Partition
-	if len(pvs) == 0 {
+	if !wholePV {
 		var err error
 		if parts, err = partition.Partitions(ra, size); err != nil {
 			return nil, nil, err
@@ -116,6 +121,8 @@ func resolveVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) 
 			v.FSType = "lvm2-pv"
 			if pv, perr := lvm.ProbePV(v.ra, p.Size, p.Offset); perr == nil {
 				pvs = append(pvs, pv)
+			} else {
+				v.Note = "LVM2 PV metadata probe failed: " + perr.Error()
 			}
 		case p.LikelyNTFS:
 			v.FSType = "ntfs"

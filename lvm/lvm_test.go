@@ -179,3 +179,24 @@ logical_volumes { root { id = "L"
 		t.Fatalf("control: %+v %v", vg, err)
 	}
 }
+
+func TestParseConfigQuotedEscapes(t *testing.T) {
+	text := `vg0 {
+description = "Write from lvcreate --config 'log/command_log_selection=\"log_context!=\"' path=\\tmp"
+seqno = 2
+}`
+	name, root, err := parseConfig(text)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if name != "vg0" {
+		t.Fatalf("vg name: %q", name)
+	}
+	vg := root.section("vg0")
+	if got, want := vg.values["description"], `Write from lvcreate --config 'log/command_log_selection="log_context!="' path=\tmp`; got != want {
+		t.Fatalf("description: %q, want %q", got, want)
+	}
+	if seqno, _ := vg.int("seqno"); seqno != 2 {
+		t.Fatalf("seqno after escaped string: %d", seqno)
+	}
+}

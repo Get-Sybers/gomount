@@ -6,7 +6,9 @@ package main
 // itself.
 
 import (
+	"bytes"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/Get-Sybers/gomount/fsx/fsxtest"
@@ -108,6 +110,38 @@ func TestResolveVolumesStack(t *testing.T) {
 	// a PV itself is not openable, with a pointed error
 	if _, _, _, err := openRef(vols[0]); err == nil {
 		t.Fatal("opening a bare PV must fail")
+	}
+}
+
+func TestResolveVolumesNotesFailedPVMetadata(t *testing.T) {
+	f, size := fsxtest.Open(t, "fsx/testdata", "lvm")
+	data, err := io.ReadAll(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if int64(len(data)) != size {
+		t.Fatalf("fixture read: %d, want %d", len(data), size)
+	}
+	data = bytes.ReplaceAll(data, []byte("vg0 {"), []byte("\"g0 {"))
+	vols, vgs, err := resolveVolumes(bytes.NewReader(data), int64(len(data)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(vgs) != 0 {
+		t.Fatalf("corrupt metadata assembled VGs: %+v", vgs)
+	}
+	var noted int
+	for _, v := range vols {
+		if v.FSType != "lvm2-pv" {
+			continue
+		}
+		noted++
+		if !strings.Contains(v.Note, "LVM2 PV metadata probe failed: lvm: metadata text:") {
+			t.Fatalf("PV note: %q", v.Note)
+		}
+	}
+	if noted != 2 {
+		t.Fatalf("noted PVs: %d in %+v", noted, vols)
 	}
 }
 

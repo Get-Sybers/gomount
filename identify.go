@@ -118,6 +118,7 @@ func identifyImageFile(path string) (*identifyDoc, error) {
 		iv := identifyVolume{
 			Volume: v.Index, Source: v.Source, Offset: v.Offset, Size: v.Size,
 			FSType: v.FSType,
+			Note:   v.Note,
 		}
 		if v.FSType != "" && v.FSType != "lvm2-pv" && v.FSType != "ntfs" && v.FSType != "apfs-container" && v.ra != nil {
 			if _, raw, release, ferr := openRef(v); ferr == nil && raw != nil {

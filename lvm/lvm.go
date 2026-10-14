@@ -605,13 +605,35 @@ func (p *parser) value() (any, error) {
 func (p *parser) quoted() (string, error) {
 	p.pos++ // opening quote
 	start := p.pos
-	for p.pos < len(p.s) && p.s[p.pos] != '"' {
-		p.pos++
+	var b strings.Builder
+	for p.pos < len(p.s) {
+		switch p.s[p.pos] {
+		case '"':
+			if b.Len() == 0 {
+				s := p.s[start:p.pos]
+				p.pos++
+				return s, nil
+			}
+			b.WriteString(p.s[start:p.pos])
+			p.pos++
+			return b.String(), nil
+		case '\\':
+			if p.pos+1 >= len(p.s) {
+				return "", fmt.Errorf("unterminated string")
+			}
+			b.WriteString(p.s[start:p.pos])
+			next := p.s[p.pos+1]
+			if next == '"' || next == '\\' {
+				b.WriteByte(next)
+			} else {
+				b.WriteByte('\\')
+				b.WriteByte(next)
+			}
+			p.pos += 2
+			start = p.pos
+		default:
+			p.pos++
+		}
 	}
-	if p.pos >= len(p.s) {
-		return "", fmt.Errorf("unterminated string")
-	}
-	s := p.s[start:p.pos]
-	p.pos++
-	return s, nil
+	return "", fmt.Errorf("unterminated string")
 }
