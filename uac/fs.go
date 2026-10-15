@@ -110,6 +110,16 @@ func (t *tree) lookup(p string) *node {
 	return cur
 }
 
+// isDir reports whether the node is a directory for traversal: its member
+// says so, or it has children. An archive that stores a path both as a
+// symlink/file and with members beneath it — a merged-usr `/bin` -> `usr/bin`
+// carrying `/bin/ls`, or a crafted `/etc/passwd/x` — must still let Walk and
+// ReadDir reach those children, which Stat/Open and identify's root_members
+// already count (#15). The directory view wins.
+func (n *node) isDir() bool {
+	return n.m.typ == typeDir || len(n.children) > 0
+}
+
 // entry renders a node as the fsx view of it.
 func (n *node) entry() fsx.Entry {
 	m := n.m
@@ -118,11 +128,14 @@ func (n *node) entry() fsx.Entry {
 		Size: m.size, UID: m.uid, GID: m.gid, Mode: m.mode,
 		Mtime: m.mtime, Atime: m.atime, Ctime: m.ctime, LinkTarget: m.link,
 	}
-	switch m.typ {
-	case typeDir:
-		e.IsDir, e.Size = true, 0
+	switch {
+	case n.isDir():
+		// a node with children is a directory even when a member typed it a
+		// file or symlink: the directory view wins so the children stay
+		// reachable, and the conflicting size/link are dropped here.
+		e.IsDir, e.Size, e.LinkTarget = true, 0, ""
 		e.Mode |= modeDir
-	case typeSymlink:
+	case m.typ == typeSymlink:
 		e.Mode |= modeSymlink
 		e.Size = int64(len(m.link)) // the icat precedent: a link's data is its target
 	default:
@@ -172,7 +185,7 @@ func (f *FS) ReadDir(dir string) ([]fsx.Entry, error) {
 	if n == nil {
 		return nil, fmt.Errorf("%s: no such file or directory", dir)
 	}
-	if n.m.typ != typeDir {
+	if !n.isDir() {
 		return nil, fmt.Errorf("%s: not a directory", dir)
 	}
 	children := n.sortedChildren()
@@ -199,10 +212,10 @@ func (f *FS) Open(p string) (io.ReadCloser, error) {
 	if n == nil {
 		return nil, fmt.Errorf("%s: no such file or directory", p)
 	}
-	switch n.m.typ {
-	case typeDir:
+	if n.isDir() {
 		return nil, fmt.Errorf("%s: is a directory", p)
-	case typeSymlink:
+	}
+	if n.m.typ == typeSymlink {
 		return io.NopCloser(strings.NewReader(n.m.link)), nil
 	}
 	if n.m.open == nil {
@@ -217,14 +230,15 @@ func (f *FS) Walk(fn func(e fsx.Entry, open func() (io.ReadCloser, error)) error
 	var walk func(n *node) error
 	walk = func(n *node) error {
 		for _, c := range n.sortedChildren() {
+			dir := c.isDir()
 			var open func() (io.ReadCloser, error)
-			if c.m.typ == typeFile && c.m.open != nil {
+			if !dir && c.m.typ == typeFile && c.m.open != nil {
 				open = c.m.open
 			}
 			if err := fn(c.entry(), open); err != nil {
 				return err
 			}
-			if c.m.typ == typeDir {
+			if dir {
 				if err := walk(c); err != nil {
 					return err
 				}

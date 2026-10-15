@@ -352,13 +352,24 @@ func (a *Archive) indexTar(src *io.SectionReader, size int64) error {
 			pending = append(pending, hardLink{name: hdr.Name, target: hdr.Linkname, m: m})
 		case tar.TypeReg, tar.TypeGNUSparse: // archive/tar reads the old TypeRegA as TypeReg
 			m.typ = typeFile
-			if dataOff+hdr.Size > size {
-				m.size = max(size-dataOff, 0) // what the archive still holds
-				a.note(fmt.Errorf("tar ends inside %s", hdr.Name))
-			}
-			off, n := dataOff, m.size
-			m.open = func() (io.ReadCloser, error) {
-				return io.NopCloser(io.NewSectionReader(src, off, n)), nil
+			if isSparseHeader(hdr) {
+				// A GNU --sparse member packs fewer bytes than its logical size
+				// at the data offset and stores them discontiguously, so a
+				// SectionReader there reads the packed data plus the following
+				// members' bytes, or falsely looks truncated (#14). Read the
+				// member back through tar.Reader, which expands the holes;
+				// m.size stays the logical size.
+				name := hdr.Name
+				m.open = func() (io.ReadCloser, error) { return openTarMember(src, size, name) }
+			} else {
+				if dataOff+hdr.Size > size {
+					m.size = max(size-dataOff, 0) // what the archive still holds
+					a.note(fmt.Errorf("tar ends inside %s", hdr.Name))
+				}
+				off, n := dataOff, m.size
+				m.open = func() (io.ReadCloser, error) {
+					return io.NopCloser(io.NewSectionReader(src, off, n)), nil
+				}
 			}
 		default:
 			continue // devices, fifos: nothing a tree reads
@@ -383,6 +394,43 @@ func (a *Archive) indexTar(src *io.SectionReader, size int64) error {
 		}
 	}
 	return nil
+}
+
+// isSparseHeader reports whether a tar member is a GNU/PAX sparse file, whose
+// packed bytes are shorter than its logical size and stored discontiguously:
+// the old GNU format flags it as TypeGNUSparse, PAX format carries GNU.sparse.*
+// records on a TypeReg member.
+func isSparseHeader(hdr *tar.Header) bool {
+	if hdr.Typeflag == tar.TypeGNUSparse {
+		return true
+	}
+	for k := range hdr.PAXRecords {
+		if strings.HasPrefix(k, "GNU.sparse.") {
+			return true
+		}
+	}
+	return false
+}
+
+// openTarMember re-scans the (already-decompressed) tar at src and returns a
+// reader over one member's logical content — archive/tar expands the sparse
+// holes as it reads. Used only for sparse members, whose packed layout a
+// SectionReader cannot address; O(scan) per open, and sparse members are rare
+// (UAC's own archiver never writes them).
+func openTarMember(src *io.SectionReader, size int64, name string) (io.ReadCloser, error) {
+	tr := tar.NewReader(io.NewSectionReader(src, 0, size))
+	for {
+		hdr, err := tr.Next()
+		if errors.Is(err, io.EOF) {
+			return nil, fmt.Errorf("uac: member %s not found on re-scan", name)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("uac: sparse member %s: %w", name, err)
+		}
+		if hdr.Name == name {
+			return io.NopCloser(tr), nil
+		}
+	}
 }
 
 type hardLink struct {
