@@ -195,6 +195,7 @@ sets:
       - 'private/var/db/dslocal/nodes/Default/groups/**'
       - 'private/var/db/com.apple.backgroundtaskmanagement/**'
       - 'private/var/log/**'
+      - '.fseventsd/**'
       - 'private/var/run/utmpx'
       - 'private/var/at/**'
       - 'private/etc/passwd'
