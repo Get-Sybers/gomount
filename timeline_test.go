@@ -5,16 +5,22 @@ package main
 // state, residue rows and content hashes.
 
 import (
+	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"math/rand"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Get-Sybers/gomount/image"
+	"github.com/Get-Sybers/gopinfo/tstamp"
 )
 
 func TestIdentifyLVMStack(t *testing.T) {
@@ -212,5 +218,129 @@ func TestMaterialiseLinuxCore(t *testing.T) {
 	}
 	if staged < 3 { // lost+found #12 + two orphans at minimum
 		t.Fatalf("residue staged: %d", staged)
+	}
+}
+
+// writeCollectionWithBodyfile writes a minimal UAC collection carrying a given
+// bodyfile/bodyfile.txt, for the #9 timeline path.
+func writeCollectionWithBodyfile(t *testing.T, bodyfile string) string {
+	t.Helper()
+	when := time.Date(2026, 10, 14, 11, 39, 3, 0, time.UTC)
+	pad := make([]byte, 4096) // incompressible, so the gzip'd collection clears uac.Detect's 512-byte floor
+	rand.New(rand.NewSource(1)).Read(pad)
+	members := []struct {
+		name, body string
+	}{
+		{"uac.log", "2026-10-14 11:39:03 +0000 INF Unix-like Artifacts Collector 3.4.0\n2026-10-14 11:39:03 +0000 INF Operating system: linux\n2026-10-14 11:39:03 +0000 INF Hostname: web01\n"},
+		{"bodyfile/bodyfile.txt", bodyfile},
+		{"[root]/etc/passwd", "root:x:0:0::/root:/bin/bash\n"},
+		{"[root]/var/log/pad.bin", string(pad)},
+	}
+	var buf bytes.Buffer
+	zw := gzip.NewWriter(&buf)
+	tw := tar.NewWriter(zw)
+	for _, m := range members {
+		hdr := &tar.Header{Name: m.name, Typeflag: tar.TypeReg, Mode: 0o644, ModTime: when, Size: int64(len(m.body)), Format: tar.FormatGNU}
+		if err := tw.WriteHeader(hdr); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tw.Write([]byte(m.body)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	p := filepath.Join(t.TempDir(), "uac-web01-linux-20261014113903.tar.gz")
+	if err := os.WriteFile(p, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// #9: timeline over a UAC collection reads the host's full fs:stat timeline
+// from bodyfile/bodyfile.txt — one row per non-null timestamp kind, with the
+// mode parsed back to octal, symlinks split, and a 0 an honest null.
+func TestTimelineCollectionBodyfile(t *testing.T) {
+	bodyfile := strings.Join([]string{
+		"0|/etc/passwd|131|-rw-r--r--|0|0|1852|1686141501|1680208032|1680208033|0",                  // atime,mtime,ctime; crtime 0 -> no birth
+		"0|/etc|128|drwxr-xr-x|0|0|4096|0|1680208000|1680208000|0",                                  // dir; atime 0 -> no access
+		"0|/bin -> usr/bin|5|lrwxrwxrwx|0|0|7|1680200000|1680200000|1680200000|0",                   // symlink
+		"0|/root/.profile|200|-rw-------|1000|1000|807|1680200000|1680200000|1680200000|1680100000", // crtime set -> birth
+		"0|/zero|9|-rw-r--r--|0|0|0|0|0|0|0",                                                        // all null -> NO rows
+		"",
+	}, "\n")
+	p := writeCollectionWithBodyfile(t, bodyfile)
+	stdout := captureStdout(t, func() {
+		if code := runTimeline([]string{p}); code != 0 {
+			t.Errorf("timeline exit %d", code)
+		}
+	})
+
+	type row struct {
+		TimeKind, Volume, FSType, Path, Mode, LinkTarget, EventTime string
+		IsDir                                                       bool
+		Size                                                        int64
+		UID, GID                                                    *uint32
+	}
+	byPath := map[string][]row{}
+	for _, line := range strings.Split(strings.TrimSpace(stdout), "\n") {
+		if line == "" {
+			continue
+		}
+		var r row
+		if err := json.Unmarshal([]byte(line), &r); err != nil {
+			t.Fatal(err)
+		}
+		if r.FSType != "uac" { // skip the collector-output (uac-meta) member-mtime rows
+			continue
+		}
+		if r.Volume != "[root]" {
+			t.Errorf("bodyfile row volume = %q, want [root]", r.Volume)
+		}
+		byPath[r.Path] = append(byPath[r.Path], r)
+	}
+	kinds := func(p string) string {
+		var ks []string
+		for _, r := range byPath[p] {
+			ks = append(ks, r.TimeKind)
+		}
+		sort.Strings(ks)
+		return strings.Join(ks, ",")
+	}
+
+	if len(byPath["/zero"]) != 0 {
+		t.Errorf("/zero (all-null) emitted %d rows, want 0", len(byPath["/zero"]))
+	}
+	if got := kinds("/etc/passwd"); got != "access,change,modify" {
+		t.Errorf("/etc/passwd kinds = %q, want access,change,modify", got)
+	}
+	if pw := byPath["/etc/passwd"][0]; pw.Mode != "100644" || pw.Size != 1852 || pw.UID == nil || *pw.UID != 0 {
+		t.Errorf("/etc/passwd row = %+v", pw)
+	}
+	if got := kinds("/etc"); got != "change,modify" {
+		t.Errorf("/etc kinds = %q, want change,modify", got)
+	}
+	if d := byPath["/etc"][0]; !d.IsDir || d.Mode != "40755" {
+		t.Errorf("/etc dir row mode/isdir = %+v", d)
+	}
+	if b := byPath["/bin"]; len(b) == 0 || b[0].LinkTarget != "usr/bin" || b[0].Mode != "120777" {
+		t.Errorf("/bin symlink rows = %+v", b)
+	}
+	if got := kinds("/root/.profile"); got != "access,birth,change,modify" {
+		t.Errorf("/root/.profile kinds = %q, want access,birth,change,modify", got)
+	}
+	for _, r := range byPath["/root/.profile"] {
+		if r.TimeKind == "birth" {
+			if want := time.Unix(1680100000, 0).UTC().Format(tstamp.ISO8601Layout); r.EventTime != want {
+				t.Errorf("birth EventTime = %q, want %q", r.EventTime, want)
+			}
+			if r.UID == nil || *r.UID != 1000 {
+				t.Errorf("/root/.profile uid = %v, want 1000", r.UID)
+			}
+		}
 	}
 }
