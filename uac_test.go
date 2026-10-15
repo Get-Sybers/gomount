@@ -147,6 +147,7 @@ func TestMaterialiseCollectionLinuxCore(t *testing.T) {
 	}
 	defer f.Close()
 	rows := 0
+	links := map[string]string{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		var row map[string]any
@@ -160,9 +161,20 @@ func TestMaterialiseCollectionLinuxCore(t *testing.T) {
 		if _, has := row["mftid"]; has {
 			t.Errorf("an archive member grew an mftid: %v", row)
 		}
+		if l, ok := row["link"].(string); ok {
+			links[row["path"].(string)] = l
+		}
 	}
 	if rows != 6 {
 		t.Errorf("manifest rows = %d, want 6 (the symlink included)", rows)
+	}
+	// the symlink's row carries its target text so a parser can tell link text
+	// from content (#10); a regular file's row has no link field
+	if links["/etc/os-release"] != "../usr/lib/os-release" {
+		t.Errorf("os-release manifest link = %q, want %q", links["/etc/os-release"], "../usr/lib/os-release")
+	}
+	if _, isLink := links["/etc/passwd"]; isLink {
+		t.Errorf("a regular file grew a link field: %v", links)
 	}
 }
 

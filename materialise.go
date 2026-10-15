@@ -81,6 +81,7 @@ type materialiseRecord struct {
 	Label  string           `json:"label,omitempty"`
 	Inode  uint64           `json:"inode,omitempty"`
 	Staged string           `json:"staged,omitempty"` // stage-relative path when != path
+	Link   string           `json:"link,omitempty"`   // symlink target text — set exactly when the staged file IS a symlink (its content is the target), so a parser can tell link text from content
 	Skip   string           `json:"skip,omitempty"`   // why a file was NOT pulled
 	Res    *manifestResidue `json:"residue,omitempty"`
 }
@@ -209,6 +210,7 @@ func runMaterialise(argv []string) int {
 	newRecord := func(e fileEntry) materialiseRecord {
 		r := origin
 		r.Path, r.Size, r.Mtime, r.MFTID, r.Inode = e.Path, e.Size, tsCol(e.Mtime), e.MFTID, e.Inode
+		r.Link = e.LinkTarget // non-empty only for a symlink, whose staged content is this target text
 		return r
 	}
 
