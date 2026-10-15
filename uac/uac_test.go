@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/rand"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -475,4 +476,161 @@ func childNames(t *testing.T, fsys *FS, dir string) []string {
 		names = append(names, e.Name)
 	}
 	return names
+}
+
+// #15: an archive that stores a path as a symlink/file AND stores members
+// beneath it must still let Walk/ReadDir reach those children. indexTar and
+// indexZip feed tree.add in member order, so both orders are covered here.
+func TestTreeKeepsChildrenUnderNonDir(t *testing.T) {
+	add := func(tr *tree, rel string, typ memberType, link string) {
+		m := &member{typ: typ, link: link}
+		if typ == typeFile {
+			m.size, m.open = 1, func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("x")), nil }
+		}
+		tr.add(rel, m)
+	}
+	type mem struct {
+		rel  string
+		typ  memberType
+		link string
+	}
+	cases := []struct {
+		name          string
+		members       []mem
+		parent, child string // ReadDir(parent) must list child
+		reach         string // Walk + Stat must reach this path
+	}{
+		{"merged-usr symlink before child",
+			[]mem{{"bin", typeSymlink, "usr/bin"}, {"bin/ls", typeFile, ""}}, "/bin", "ls", "/bin/ls"},
+		{"merged-usr child before symlink",
+			[]mem{{"bin/ls", typeFile, ""}, {"bin", typeSymlink, "usr/bin"}}, "/bin", "ls", "/bin/ls"},
+		{"child under a file",
+			[]mem{{"etc/passwd", typeFile, ""}, {"etc/passwd/x", typeFile, ""}}, "/etc/passwd", "x", "/etc/passwd/x"},
+		{"dir overwritten by a regular file",
+			[]mem{{"etc/passwd", typeFile, ""}, {"etc", typeFile, ""}}, "/etc", "passwd", "/etc/passwd"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			tr := newTree()
+			for _, m := range c.members {
+				add(tr, m.rel, m.typ, m.link)
+			}
+			fs := &FS{t: tr}
+
+			ents, err := fs.ReadDir(c.parent)
+			if err != nil {
+				t.Fatalf("ReadDir(%s): %v", c.parent, err)
+			}
+			found := false
+			for _, e := range ents {
+				if e.Name == c.child {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("ReadDir(%s) does not list %q: %+v", c.parent, c.child, ents)
+			}
+			if st, _ := fs.Stat(c.parent); !st.IsDir {
+				t.Fatalf("Stat(%s).IsDir = false, want true (it has children)", c.parent)
+			}
+			seen := map[string]bool{}
+			if err := fs.Walk(func(e fsx.Entry, _ func() (io.ReadCloser, error)) error {
+				seen[e.Path] = true
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			if !seen[c.reach] {
+				t.Fatalf("Walk did not reach %q; saw %v", c.reach, seen)
+			}
+			if _, err := fs.Stat(c.reach); err != nil {
+				t.Fatalf("Stat(%s): %v", c.reach, err)
+			}
+		})
+	}
+}
+
+// #14: a GNU --sparse member must read its real (hole-expanded) bytes, not the
+// packed bytes plus the following member's, and the archive must not look
+// truncated. Built with the system tar (the issue reproduced with GNU tar
+// 1.35); skips where tar or --sparse is unavailable, and where the temp
+// filesystem does not store the hole sparsely (then tar writes it normally and
+// there is nothing to exercise).
+func TestSparseTarMemberReadsRealBytes(t *testing.T) {
+	tarBin, err := exec.LookPath("tar")
+	if err != nil {
+		t.Skip("no tar in PATH")
+	}
+	const hole = 64 * 1024
+	want := append(append([]byte("HEADDATA"), make([]byte, hole)...), []byte("TAILDATA")...)
+
+	for _, format := range []string{"posix", "gnu"} {
+		t.Run(format, func(t *testing.T) {
+			dir := t.TempDir()
+			mustWrite(t, filepath.Join(dir, "uac.log"), []byte(fixtureLog))
+			if err := os.MkdirAll(filepath.Join(dir, "[root]/var/log"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			// a real on-disk sparse file: HEAD, a hole, TAIL
+			sp, err := os.Create(filepath.Join(dir, "[root]/var/log/lastlog"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sp.Write(want[:8])
+			sp.Seek(int64(len(want)-8), io.SeekStart)
+			sp.Write(want[len(want)-8:])
+			sp.Close()
+			if err := os.MkdirAll(filepath.Join(dir, "[root]/etc"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			mustWrite(t, filepath.Join(dir, "[root]/etc/hostname"), []byte("web01\n"))
+
+			out := filepath.Join(dir, "col.tar")
+			cmd := exec.Command(tarBin, "--sparse", "--format="+format, "-cf", out, "-C", dir, "uac.log", "[root]")
+			if b, err := cmd.CombinedOutput(); err != nil {
+				t.Skipf("tar --sparse --format=%s unavailable: %v: %s", format, err, b)
+			}
+			b, err := os.ReadFile(out)
+			if err != nil {
+				t.Fatal(err)
+			}
+			a, err := Open(bytes.NewReader(b), int64(len(b)))
+			if err != nil {
+				t.Fatalf("Open: %v", err)
+			}
+			defer a.Close()
+			if a.Truncated() != nil {
+				t.Errorf("Truncated = %v on a whole archive carrying a sparse member", a.Truncated())
+			}
+			got := readMember(t, a, "/var/log/lastlog")
+			if !bytes.Equal(got, want) {
+				t.Fatalf("lastlog: got %d bytes, want %d (equal=%v) — packed bytes leaked?",
+					len(got), len(want), bytes.Equal(got, want))
+			}
+			if h := readMember(t, a, "/etc/hostname"); string(h) != "web01\n" {
+				t.Fatalf("follower after the sparse member reads wrong: %q", h)
+			}
+		})
+	}
+}
+
+func mustWrite(t *testing.T, path string, b []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, b, 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func readMember(t *testing.T, a *Archive, p string) []byte {
+	t.Helper()
+	rc, err := a.Root().Open(p)
+	if err != nil {
+		t.Fatalf("Open %s: %v", p, err)
+	}
+	defer rc.Close()
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read %s: %v", p, err)
+	}
+	return b
 }
