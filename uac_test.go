@@ -194,10 +194,19 @@ func TestTimelineAndStreamAllOverCollection(t *testing.T) {
 		paths = append(paths, row.Volume+":"+row.Path+":"+row.TimeKind)
 	}
 	joined := strings.Join(paths, " ")
-	for _, want := range []string{"[root]:/etc/passwd:modify", "[root]:/etc:none", "uac:/uac.log:modify"} {
+	// [root]'s rows now come from the collector's bodyfile (#9) — the full
+	// fs:stat timeline (access/modify/change here), not just the collected
+	// member's mtime; the meta volume keeps its member-mtime rows.
+	for _, want := range []string{
+		"[root]:/etc/passwd:modify", "[root]:/etc/passwd:access", "[root]:/etc/passwd:change",
+		"uac:/uac.log:modify",
+	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("timeline lacks %s:\n%s", want, joined)
 		}
+	}
+	if strings.Contains(joined, "[root]:/etc:none") {
+		t.Errorf("[root] still walks collected members instead of reading the bodyfile:\n%s", joined)
 	}
 
 	fsys, closer, err := openVolumeFS(archive, 0, "")

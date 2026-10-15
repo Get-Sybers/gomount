@@ -12,6 +12,7 @@
 package main
 
 import (
+	"bufio"
 	"crypto/md5"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -22,10 +23,13 @@ import (
 	"hash"
 	"io"
 	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Get-Sybers/gomount/fsx"
 	"github.com/Get-Sybers/gomount/image"
+	"github.com/Get-Sybers/gomount/uac"
 	"github.com/Get-Sybers/gopinfo/tstamp"
 )
 
@@ -134,6 +138,15 @@ func runTimeline(argv []string) int {
 
 // timelineVolume emits one volume's rows.
 func timelineVolume(enc *json.Encoder, v volumeRef, withResidue, withHash bool, sum *timelineSummary) error {
+	// A UAC collection's [root] volume: its collected member mtimes are only a
+	// fraction of the host, but the collector's bodyfile/bodyfile.txt carries
+	// the whole fs:stat timeline — emit that instead when it is present (#9).
+	// The collector-output volume keeps its member-mtime rows.
+	if handled, err := emitBodyfile(enc, v, sum); err != nil {
+		return err
+	} else if handled {
+		return nil
+	}
 	_, fsys, release, err := openRef(v)
 	if err != nil {
 		return err
@@ -225,4 +238,143 @@ func hashContent(open func() (io.ReadCloser, error)) (md5s, sha1s, sha256s strin
 	}
 	hexOf := func(h hash.Hash) string { return hex.EncodeToString(h.Sum(nil)) }
 	return hexOf(h5), hexOf(h1), hexOf(h256), nil
+}
+
+// emitBodyfile emits a UAC collection's full fs:stat timeline from the
+// collector's bodyfile/bodyfile.txt (TSK 3.x), when the volume is the host
+// tree ([root]) and the bodyfile is present. Returns handled=true when it took
+// the volume (so the caller skips the collected-member walk); handled=false
+// means no bodyfile — fall back to that walk.
+func emitBodyfile(enc *json.Encoder, v volumeRef, sum *timelineSummary) (bool, error) {
+	if v.collection == nil || v.FSType != uac.FSTypeRoot {
+		return false, nil
+	}
+	rc, err := v.collection.Meta().Open("/bodyfile/bodyfile.txt")
+	if err != nil {
+		return false, nil // no bodyfile in this collection
+	}
+	defer rc.Close()
+	sc := bufio.NewScanner(rc)
+	sc.Buffer(make([]byte, 0, 64*1024), 8*1024*1024) // long paths
+	for sc.Scan() {
+		e, ok := parseBodyfile(sc.Text())
+		if !ok {
+			continue
+		}
+		base := timelineRow{
+			Tool: "gomount", RecordType: "timeline",
+			Volume: v.Source, FSType: v.FSType,
+			Path: e.path, IsDir: e.isDir, Size: e.size,
+			Inode: e.inode, LinkTarget: e.link, Allocated: true,
+		}
+		if e.mode != 0 {
+			base.Mode = fmt.Sprintf("%o", e.mode)
+			uid, gid := e.uid, e.gid
+			base.UID, base.GID = &uid, &gid
+		}
+		for _, k := range []struct {
+			kind string
+			t    int64
+		}{{"birth", e.crtime}, {"modify", e.mtime}, {"access", e.atime}, {"change", e.ctime}} {
+			if k.t <= 0 {
+				continue // a 0 is an honest null — no row
+			}
+			row := base
+			row.TimeKind = k.kind
+			row.EventTime = time.Unix(k.t, 0).UTC().Format(tstamp.ISO8601Layout)
+			if err := enc.Encode(row); err != nil {
+				return true, err
+			}
+			sum.Rows++
+		}
+	}
+	return true, sc.Err()
+}
+
+// bodyfileEntry is one parsed TSK 3.x bodyfile row.
+type bodyfileEntry struct {
+	path, link                  string
+	inode                       uint64
+	mode                        uint32
+	isDir                       bool
+	uid, gid                    uint32
+	size                        int64
+	atime, mtime, ctime, crtime int64
+}
+
+// parseBodyfile parses one TSK 3.x bodyfile line:
+//
+//	MD5|name|inode|mode_as_string|UID|GID|size|atime|mtime|ctime|crtime
+//
+// The name may itself contain "|"; the nine trailing fields are fixed, so the
+// name is whatever lies between the leading MD5 and them. A symlink's name is
+// "path -> target".
+func parseBodyfile(line string) (bodyfileEntry, bool) {
+	parts := strings.Split(line, "|")
+	if len(parts) < 11 {
+		return bodyfileEntry{}, false
+	}
+	tail := parts[len(parts)-9:]
+	name := strings.Join(parts[1:len(parts)-9], "|")
+	e := bodyfileEntry{path: name}
+	if i := strings.Index(name, " -> "); i >= 0 {
+		e.path, e.link = name[:i], name[i+4:]
+	}
+	if e.path == "" {
+		return e, false
+	}
+	e.inode = parseUint(tail[0])
+	e.mode, e.isDir = modeStringToMode(tail[1])
+	e.uid = uint32(parseUint(tail[2]))
+	e.gid = uint32(parseUint(tail[3]))
+	e.size = int64(parseUint(tail[4]))
+	e.atime, e.mtime, e.ctime, e.crtime = parseInt(tail[5]), parseInt(tail[6]), parseInt(tail[7]), parseInt(tail[8])
+	return e, true
+}
+
+func parseUint(s string) uint64 { n, _ := strconv.ParseUint(strings.TrimSpace(s), 10, 64); return n }
+func parseInt(s string) int64   { n, _ := strconv.ParseInt(strings.TrimSpace(s), 10, 64); return n }
+
+// modeStringToMode turns TSK's `-rwxr-xr-x` rendering back into an octal mode
+// with its type bits, and reports whether it is a directory.
+func modeStringToMode(s string) (uint32, bool) {
+	if len(s) < 10 {
+		return 0, false
+	}
+	var mode uint32
+	isDir := false
+	switch s[0] {
+	case 'd':
+		mode, isDir = 0o040000, true
+	case 'l':
+		mode = 0o120000
+	case 'b':
+		mode = 0o060000
+	case 'c':
+		mode = 0o020000
+	case 'p':
+		mode = 0o010000
+	case 's':
+		mode = 0o140000
+	default: // '-' and anything unexpected: a regular file
+		mode = 0o100000
+	}
+	p := s[1:10]
+	for i, bit := range []uint32{0o400, 0o200, 0o100, 0o040, 0o020, 0o010, 0o004, 0o002, 0o001} {
+		switch p[i] {
+		case '-', 'S', 'T': // no execute bit (S/T is the special bit without execute)
+		default: // r, w, x, s, t
+			mode |= bit
+		}
+	}
+	if p[2] == 's' || p[2] == 'S' {
+		mode |= 0o4000 // setuid
+	}
+	if p[5] == 's' || p[5] == 'S' {
+		mode |= 0o2000 // setgid
+	}
+	if p[8] == 't' || p[8] == 'T' {
+		mode |= 0o1000 // sticky
+	}
+	return mode, isDir
 }
