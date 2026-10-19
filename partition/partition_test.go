@@ -14,8 +14,8 @@ import (
 func TestMBRDiskSignature(t *testing.T) {
 	img := make([]byte, 4096)
 	binary.LittleEndian.PutUint32(img[440:444], 0x1a2b3c4d) // disk signature
-	e := img[446:462]                                        // one primary entry
-	e[4] = 0x83                                              // Linux
+	e := img[446:462]                                       // one primary entry
+	e[4] = 0x83                                             // Linux
 	binary.LittleEndian.PutUint32(e[8:12], 1)               // startLBA
 	binary.LittleEndian.PutUint32(e[12:16], 1)              // sectors
 	img[510], img[511] = 0x55, 0xAA
