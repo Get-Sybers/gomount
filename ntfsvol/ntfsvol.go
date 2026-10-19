@@ -13,6 +13,7 @@
 package ntfsvol
 
 import (
+	"encoding/hex"
 	"fmt"
 	"io"
 
@@ -82,6 +83,27 @@ func ReadNTFSGeometry(ra io.ReaderAt, offset, partSize int64) (Geometry, error) 
 			partSize, bpbVolumeBytes, diff, bytesPerSector)
 	}
 	return g, nil
+}
+
+// ReadSerial returns the NTFS $Boot volume serial number (the 8 bytes at
+// boot-sector +0x48) as a lowercase hex string in on-disk byte order — the
+// volume identity an NTFS filesystem carries in place of an FSUUID. It
+// returns "" when the sector at offset is not an NTFS boot sector or cannot
+// be read, so a caller surfaces an honest null. It is lenient by design
+// (only the OEM id is checked, not full BPB validity): resolveVolumes has
+// already decided the volume is NTFS, and a serial is worth reading even
+// from a volume go-ntfs would reject structurally.
+func ReadSerial(ra io.ReaderAt, offset int64) string {
+	profile := ntfs.NewNTFSProfile()
+	boot := profile.NTFS_BOOT_SECTOR(ra, offset)
+	if boot.Oemname() != "NTFS    " {
+		return ""
+	}
+	raw := []byte(boot.Serial()) // go-ntfs reads the 8 serial bytes verbatim
+	if len(raw) == 0 {
+		return ""
+	}
+	return hex.EncodeToString(raw)
 }
 
 // VolumeReader returns a read-only io.ReaderAt bounded to exactly [offset,

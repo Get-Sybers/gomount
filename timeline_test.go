@@ -24,12 +24,24 @@ import (
 )
 
 func TestIdentifyLVMStack(t *testing.T) {
-	doc, err := identifyImageFile(fixturePath(t, "lvm"))
+	doc, err := identifyImageFile(fixturePath(t, "lvm"), false)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if doc.Image.Format != "raw" || len(doc.Partitions) != 2 {
 		t.Fatalf("image/partitions: %+v", doc)
+	}
+	// The lvm fixture is an MBR disk (its generator writes a zero disk
+	// signature, so disk_id is an honest null here); either way MBR carries
+	// no per-partition GUID. The populated disk_id/part_guid cases are pinned
+	// by the crafted MBR/GPT in partition/partition_test.go.
+	if doc.Image.DiskID != "" && len(doc.Image.DiskID) != 8 {
+		t.Fatalf("MBR disk_id = %q, want empty or 8 hex chars", doc.Image.DiskID)
+	}
+	for _, p := range doc.Partitions {
+		if p.PartGUID != "" {
+			t.Errorf("MBR partition %d has part_guid %q, want none", p.Index, p.PartGUID)
+		}
 	}
 	if doc.LVM == nil || len(doc.LVM.VGs) != 1 || doc.LVM.VGs[0].Name != "vg0" ||
 		len(doc.LVM.VGs[0].LVs) != 2 {
@@ -48,13 +60,17 @@ func TestIdentifyLVMStack(t *testing.T) {
 		root.UUID != "44444444-2222-3333-4444-555555555555" {
 		t.Fatalf("root lv volume: %+v", root)
 	}
+	// ext4's UUID is a canonical 128-bit id, so volume_guid mirrors it.
+	if root.VolumeGUID != root.UUID {
+		t.Errorf("ext4 volume_guid = %q, want %q", root.VolumeGUID, root.UUID)
+	}
 	if len(doc.Snapshots) != 0 {
 		t.Fatalf("snapshot inventory is P3, must be empty: %+v", doc.Snapshots)
 	}
 }
 
 func TestIdentifyOSGuess(t *testing.T) {
-	doc, err := identifyImageFile(fixturePath(t, "ext4"))
+	doc, err := identifyImageFile(fixturePath(t, "ext4"), false)
 	if err != nil {
 		t.Fatal(err)
 	}

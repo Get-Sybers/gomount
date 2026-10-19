@@ -210,6 +210,51 @@ func TestMaterialiseSelectEndToEnd(t *testing.T) {
 	}
 }
 
+// TestMaterialiseManifestIdentity proves the evidence-asset identity keys
+// land in the manifest in the frozen shape: image-level keys on the
+// path-less metadata row, volume-scoped keys on every per-file row. The
+// fixture is a raw superfloppy NTFS volume, so disk_serial and disk_id are
+// honest nulls (no EWF serial, no partition table), --hash fills
+// image_sha256 with the sha256 of the image file, and each file row carries
+// the NTFS $Boot serial as fsuuid (with volume_guid empty — NTFS identity
+// rides the disk_id/part_guid components, which a superfloppy lacks).
+func TestMaterialiseManifestIdentity(t *testing.T) {
+	img := buildMatImage(t)
+	out := t.TempDir()
+	if rc := runMaterialise([]string{"--select", "SYSTEM*", "--out", out, "--manifest", "--hash", img}); rc != 0 {
+		t.Fatalf("runMaterialise rc = %d, want 0", rc)
+	}
+	mpath := filepath.Join(out, "materialise.jsonl")
+
+	meta := readManifestMeta(t, mpath)
+	if meta.Image != filepath.Base(img) {
+		t.Errorf("metadata row image = %q, want %q", meta.Image, filepath.Base(img))
+	}
+	if meta.DiskSerial != "" || meta.DiskID != "" {
+		t.Errorf("raw superfloppy carried disk_serial=%q disk_id=%q, want both empty", meta.DiskSerial, meta.DiskID)
+	}
+	if want := sha256File(t, img); meta.ImageSHA256 != want {
+		t.Errorf("image_sha256 = %q, want %q (sha256 of the container file)", meta.ImageSHA256, want)
+	}
+
+	files := readManifest(t, mpath)
+	rec, ok := files["/SYSTEM"]
+	if !ok {
+		t.Fatalf("manifest missing /SYSTEM (have %v)", manifestKeys(files))
+	}
+	if len(rec.FSUUID) != 16 {
+		t.Errorf("NTFS fsuuid (serial) = %q, want 16 hex chars", rec.FSUUID)
+	} else if _, err := hex.DecodeString(rec.FSUUID); err != nil {
+		t.Errorf("NTFS fsuuid %q is not hex: %v", rec.FSUUID, err)
+	}
+	if rec.VolumeGUID != "" {
+		t.Errorf("NTFS volume_guid = %q, want empty", rec.VolumeGUID)
+	}
+	if rec.PartGUID != "" || rec.PartOffset != 0 {
+		t.Errorf("superfloppy part_guid=%q part_offset=%d, want empty/0", rec.PartGUID, rec.PartOffset)
+	}
+}
+
 // TestMaterialiseSetSiblings proves the artefact-set primary + sibling
 // resolution the deep Windows sets rely on: a primary resolves to its file and,
 // with siblings on, co-pulls the .LOG1/.LOG2 from the same directory; with
@@ -338,13 +383,44 @@ func sha256File(t *testing.T, path string) string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
+// readManifest returns the per-file rows keyed by volume path. The path-less
+// metadata row (the image-level defaults) is excluded — read it with
+// readManifestMeta.
 func readManifest(t *testing.T, path string) map[string]materialiseRecord {
+	t.Helper()
+	out := map[string]materialiseRecord{}
+	for _, r := range allManifestRows(t, path) {
+		if r.Path == "" {
+			continue // the path-less metadata row
+		}
+		out[r.Path] = r
+	}
+	return out
+}
+
+// readManifestMeta returns the single path-less metadata row (image-level
+// identity); it fails if there is not exactly one.
+func readManifestMeta(t *testing.T, path string) materialiseRecord {
+	t.Helper()
+	var meta []materialiseRecord
+	for _, r := range allManifestRows(t, path) {
+		if r.Path == "" {
+			meta = append(meta, r)
+		}
+	}
+	if len(meta) != 1 {
+		t.Fatalf("manifest has %d path-less metadata rows, want 1", len(meta))
+	}
+	return meta[0]
+}
+
+func allManifestRows(t *testing.T, path string) []materialiseRecord {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("read manifest: %v", err)
 	}
-	out := map[string]materialiseRecord{}
+	var out []materialiseRecord
 	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
@@ -354,7 +430,7 @@ func readManifest(t *testing.T, path string) map[string]materialiseRecord {
 		if err := json.Unmarshal([]byte(line), &r); err != nil {
 			t.Fatalf("bad manifest line %q: %v", line, err)
 		}
-		out[r.Path] = r
+		out = append(out, r)
 	}
 	return out
 }

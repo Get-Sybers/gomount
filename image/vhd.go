@@ -35,6 +35,7 @@ type vhdDisk struct {
 	f             *os.File
 	size          int64
 	diskType      uint32
+	uniqueID      [16]byte // footer "Unique Id" at +68 — the disk_serial for a VHD
 	bat           []uint32
 	blockSize     int64
 	bitmapSectors int64
@@ -94,6 +95,7 @@ func openVHD(path string, depth int) (*vhdDisk, error) {
 		return nil, errors.New("vhd: implausible disk size")
 	}
 	d := &vhdDisk{f: f, size: int64(currentSize), diskType: diskType}
+	copy(d.uniqueID[:], ft[68:84]) // footer Unique Id, present on every disk type
 	if diskType == vhdTypeFixed {
 		return d, nil
 	}

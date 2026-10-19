@@ -28,6 +28,7 @@ import (
 	yaml "github.com/Velocidex/yaml/v2"
 
 	"github.com/Get-Sybers/gomount/fsx"
+	"github.com/Get-Sybers/gomount/image"
 	"github.com/Get-Sybers/gopinfo/framework"
 )
 
@@ -71,19 +72,29 @@ func loadArtefactSets() (map[string]artefactSet, error) {
 // consumers read on; the chain fields are omitted when a backend has no
 // value for them (honest nulls).
 type materialiseRecord struct {
-	Path   string           `json:"path"`
-	Size   int64            `json:"size"`
-	Mtime  string           `json:"mtime,omitempty"`
-	MFTID  string           `json:"mftid,omitempty"`
-	Image  string           `json:"image,omitempty"`
-	Volume string           `json:"volume,omitempty"` // "p1" | "vg0/root" | "disk"
-	FSUUID string           `json:"fsuuid,omitempty"`
-	Label  string           `json:"label,omitempty"`
-	Inode  uint64           `json:"inode,omitempty"`
-	Staged string           `json:"staged,omitempty"` // stage-relative path when != path
-	Link   string           `json:"link,omitempty"`   // symlink target text — set exactly when the staged file IS a symlink (its content is the target), so a parser can tell link text from content
-	Skip   string           `json:"skip,omitempty"`   // why a file was NOT pulled
-	Res    *manifestResidue `json:"residue,omitempty"`
+	Path   string `json:"path"`
+	Size   int64  `json:"size"`
+	Mtime  string `json:"mtime,omitempty"`
+	MFTID  string `json:"mftid,omitempty"`
+	Image  string `json:"image,omitempty"`
+	Volume string `json:"volume,omitempty"` // "p1" | "vg0/root" | "disk"
+	FSUUID string `json:"fsuuid,omitempty"`
+	Label  string `json:"label,omitempty"`
+	// Evidence-asset identity (frozen gomount↔gopinfo manifest-key contract).
+	// Image-level keys ride the path-less metadata row (gopinfo reads a
+	// path-less row as manifest defaults); volume-scoped keys ride every
+	// per-file row, bound to the selected volume, like fsuuid.
+	ImageSHA256 string           `json:"image_sha256,omitempty"` // image-level: sha256 of the container bytes as delivered (--hash)
+	DiskSerial  string           `json:"disk_serial,omitempty"`  // image-level: drive serial (EWF sn) / virtual-disk container uuid
+	DiskID      string           `json:"disk_id,omitempty"`      // image-level: GPT disk GUID / MBR disk signature
+	VolumeGUID  string           `json:"volume_guid,omitempty"`  // volume-scoped: FSUUID when a canonical 128-bit UUID
+	PartGUID    string           `json:"part_guid,omitempty"`    // volume-scoped: GPT unique partition GUID
+	PartOffset  uint64           `json:"part_offset,omitempty"`  // volume-scoped: partition byte offset
+	Inode       uint64           `json:"inode,omitempty"`
+	Staged      string           `json:"staged,omitempty"` // stage-relative path when != path
+	Link        string           `json:"link,omitempty"`   // symlink target text — set exactly when the staged file IS a symlink (its content is the target), so a parser can tell link text from content
+	Skip        string           `json:"skip,omitempty"`   // why a file was NOT pulled
+	Res         *manifestResidue `json:"residue,omitempty"`
 }
 
 type manifestResidue struct {
@@ -128,6 +139,7 @@ func runMaterialise(argv []string) int {
 	out := fs.String("out", "", "output directory for the pulled artefacts (required, writable)")
 	siblings := fs.Bool("siblings", true, "also pull each artefact's named siblings (transaction logs, WAL/SHM)")
 	manifest := fs.Bool("manifest", false, "write <out>/materialise.jsonl listing every pulled file")
+	withHash := fs.Bool("hash", false, "stream sha256 over the container bytes as delivered and record it as image_sha256 on the manifest's metadata row")
 	maxSize := fs.Int64("max-file-size", 0, "skip files larger than this many bytes (0 = no limit); every skip lands in the manifest")
 	withResidue := fs.Bool("residue", false, "also stage recoverable residue content under residue/<kind>/<id>/ (Linux backends)")
 	var sets, selects multiFlag
@@ -181,11 +193,23 @@ func runMaterialise(argv []string) int {
 	defer func() { _ = closer() }()
 
 	// The manifest rows' origin chain (rule 2): the image, the volume's
-	// place in the stack, and the filesystem's durable identity.
-	origin := materialiseRecord{Image: filepath.Base(fs.Arg(0)), Volume: ref.Source}
+	// place in the stack, and the filesystem's durable identity. The
+	// volume-scoped evidence-asset keys (part_guid, part_offset, and
+	// volume_guid when the FS UUID is a canonical 128-bit id) ride every
+	// per-file row, bound to the selected volume, exactly like fsuuid.
+	origin := materialiseRecord{
+		Image: filepath.Base(fs.Arg(0)), Volume: ref.Source,
+		PartGUID: ref.PartGUID, PartOffset: uint64(ref.Offset),
+	}
 	if rawFS != nil {
 		info := rawFS.Info()
 		origin.FSUUID, origin.Label = info.UUID, info.Label
+		origin.VolumeGUID = canonicalVolumeGUID(info.UUID)
+	} else if ref.FSType == "ntfs" {
+		// NTFS has no fsx backend: its $Boot serial is the volume's durable
+		// identity, surfaced as fsuuid. volume_guid stays empty — NTFS identity
+		// rides disk_id/part_guid/part_offset (byakugan derives \\?\Volume{GUID}).
+		origin.FSUUID = ref.NTFSSerial
 	}
 
 	// Resolve every selector to a de-duplicated, path-sorted set of volume files.
@@ -248,7 +272,24 @@ func runMaterialise(argv []string) int {
 	}
 
 	if *manifest {
-		if err := writeManifest(filepath.Join(*out, "materialise.jsonl"), records); err != nil {
+		// The path-less metadata row carries the image-level identity gopinfo
+		// reads as manifest defaults; the per-file rows above carry the
+		// volume-scoped keys. --hash streams the container bytes as delivered
+		// (a large read) — a hash failure is noted, never fatal, since the
+		// files were already pulled.
+		meta := materialiseRecord{
+			Image:      filepath.Base(fs.Arg(0)),
+			DiskSerial: ref.DiskSerial,
+			DiskID:     ref.DiskID,
+		}
+		if *withHash {
+			if h, herr := image.HashContainer(fs.Arg(0)); herr != nil {
+				fmt.Fprintf(os.Stderr, "gomount materialise: --hash: %v\n", herr)
+			} else {
+				meta.ImageSHA256 = h
+			}
+		}
+		if err := writeManifest(filepath.Join(*out, "materialise.jsonl"), append([]materialiseRecord{meta}, records...)); err != nil {
 			fmt.Fprintf(os.Stderr, "gomount materialise: write manifest: %v\n", err)
 			errCount++
 		}

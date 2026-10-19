@@ -6,6 +6,28 @@ All notable changes are documented here, following
 
 ## [Unreleased]
 
+### Added
+- **Evidence-asset identity in the manifest and `identify`.** gomount already
+  read, but dropped, several disk/volume/image identifiers; they now surface so
+  a downstream row can be keyed to a resolved asset (the producer half of a
+  lockstep change with gopinfo's `Origin`). `materialise --manifest` emits the
+  volume-scoped keys `volume_guid`, `part_guid` and `part_offset` on every
+  per-file row (like `fsuuid`), and the image-level keys `disk_serial`,
+  `disk_id` and — with the new opt-in `--hash` — `image_sha256` on a leading
+  path-less metadata row; `identify` surfaces the same fields, and gains its own
+  `--hash`. All keys are additive `lower_snake`, omitted when absent (honest
+  nulls). Coverage by format/filesystem:
+  - `disk_serial`: E01 (EWF `sn` header), VMDK (`ddb.uuid.image` / `CID`),
+    VHDX (Virtual Disk ID), VHD (footer Unique Id), VDI (image uuid); raw/dd,
+    QCOW2 and the Apple images carry none.
+  - `disk_id` / `part_guid`: a GPT disk carries both (disk GUID, per-partition
+    unique GUID); an MBR disk carries `disk_id` only (the disk signature, hex);
+    a superfloppy / APM disk carries neither.
+  - `volume_guid`: the filesystem UUID of an ext/XFS/APFS/HFS+ volume (a
+    canonical 128-bit id); empty for vfat's 32-bit serial and for NTFS.
+  - NTFS volumes, which have no filesystem UUID, now carry their `$Boot` serial
+    (hex) as `fsuuid` in the manifest and as `uuid` in `identify`.
+
 ## [0.3.1] - 2026-10-15
 
 ### Fixed
