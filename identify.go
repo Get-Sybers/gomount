@@ -155,16 +155,14 @@ func identifyImageFile(path string, withHash bool) (*identifyDoc, error) {
 	if err != nil {
 		return nil, err
 	}
+	// disk_id is disk-level: the same helper materialise uses, so both report
+	// the same id for an image (an LV-selected manifest included).
+	doc.Image.DiskID = diskIDOf(vols)
 	defer closeCollections(vols)
 	if len(vols) > 0 && vols[0].collection != nil {
 		doc.Collection = describeCollection(vols[0].collection)
 	}
 	for _, v := range vols {
-		// disk_id is disk-level and repeats on every partition-backed volume;
-		// surface it once on the image (the first volume that carries it).
-		if doc.Image.DiskID == "" && v.DiskID != "" {
-			doc.Image.DiskID = v.DiskID
-		}
 		if strings.HasPrefix(v.Source, "p") && !strings.Contains(v.Source, "/") {
 			doc.Partitions = append(doc.Partitions, identifyPart{
 				Index: v.Index, Offset: v.Offset, Size: v.Size, Type: v.TypeName,

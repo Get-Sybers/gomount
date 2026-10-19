@@ -278,9 +278,13 @@ func openVolume(imgPath string, volume int, lvName string) (volumeFS, fsx.FS, vo
 		_ = closeImage()
 		return nil, nil, volumeRef{}, nil, err
 	}
-	// the image-level drive/container serial rides the selected volume so the
-	// manifest's metadata row can carry it (no extra I/O — read from the open)
+	// the image-level identity rides the selected volume so the manifest's
+	// metadata row can carry it: the drive/container serial (no extra I/O —
+	// read from the open) and the disk id aggregated across the stack, so an
+	// LV selection reports the same disk_id identify does (not the LV's own
+	// empty value).
 	sel.DiskSerial = image.DiskSerial(ra)
+	sel.DiskID = diskIDOf(vols)
 	fsys, raw, release, err := openRef(sel)
 	if err != nil {
 		_ = closeImage()
@@ -294,6 +298,23 @@ func openVolume(imgPath string, volume int, lvName string) (volumeFS, fsx.FS, vo
 		return closeImage()
 	}
 	return fsys, raw, sel, closer, nil
+}
+
+// diskIDOf returns the disk-level disk id (GPT disk GUID / MBR signature) of
+// a resolved stack: the first volume that carries one. Because the id is
+// disk-level, every partition-backed volume of the disk reports the same
+// value, while an LVM logical volume or a whole-disk filesystem carries
+// none — so aggregating across the stack gives materialise's single selected
+// volume (which may be an LV) the same disk_id that identify reports for the
+// image. "" when no volume carries one (a superfloppy, an APM disk, a zero
+// MBR signature).
+func diskIDOf(vols []volumeRef) string {
+	for _, v := range vols {
+		if v.DiskID != "" {
+			return v.DiskID
+		}
+	}
+	return ""
 }
 
 // selectVolume applies the addressing rules over the resolved list.
