@@ -69,7 +69,7 @@ func writeCollection(t *testing.T) string {
 }
 
 func TestIdentifyCollection(t *testing.T) {
-	doc, err := identifyImageFile(writeCollection(t))
+	doc, err := identifyImageFile(writeCollection(t), false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -147,12 +147,25 @@ func TestMaterialiseCollectionLinuxCore(t *testing.T) {
 	}
 	defer f.Close()
 	rows := 0
+	metaRows := 0
 	links := map[string]string{}
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
 		var row map[string]any
 		if err := json.Unmarshal(sc.Bytes(), &row); err != nil {
 			t.Fatal(err)
+		}
+		if p, _ := row["path"].(string); p == "" {
+			// the path-less metadata row: image-level identity, no per-file
+			// volume. A UAC archive carries no disk serial or disk id.
+			metaRows++
+			if row["image"] != "uac-web01-linux-20261014113903.tar.gz" {
+				t.Errorf("metadata row = %v", row)
+			}
+			if _, has := row["disk_serial"]; has {
+				t.Errorf("a UAC archive grew a disk_serial: %v", row)
+			}
+			continue
 		}
 		rows++
 		if row["image"] != "uac-web01-linux-20261014113903.tar.gz" || row["volume"] != "[root]" {
@@ -167,6 +180,9 @@ func TestMaterialiseCollectionLinuxCore(t *testing.T) {
 	}
 	if rows != 6 {
 		t.Errorf("manifest rows = %d, want 6 (the symlink included)", rows)
+	}
+	if metaRows != 1 {
+		t.Errorf("path-less metadata rows = %d, want 1", metaRows)
 	}
 	// the symlink's row carries its target text so a parser can tell link text
 	// from content (#10); a regular file's row has no link field

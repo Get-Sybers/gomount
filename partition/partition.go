@@ -26,6 +26,14 @@ type Partition struct {
 	Size       int64  // volume length in bytes (from the table; superfloppy = whole image)
 	TypeName   string // human label from the MBR type byte or GPT type GUID
 	LikelyNTFS bool   // the boot sector at Offset carries the NTFS OEM id + 0xAA55
+	// Disk/volume identity for the origin records (evidence-asset keying).
+	// DiskID is disk-level and repeats on every partition of the same disk:
+	// the GPT disk GUID, or the MBR disk signature (8 hex). PartGUID is the
+	// GPT unique partition GUID of THIS partition; it is empty on an MBR or
+	// APM disk, which carry no per-partition GUID. Both are "" when the disk
+	// carries no such id (a superfloppy, a zero signature).
+	DiskID   string
+	PartGUID string
 }
 
 // sector sizes used for LBA->byte conversion. MBR partition entries address in
@@ -207,6 +215,12 @@ func mbrTypeName(t byte) string {
 }
 
 func parseMBR(ra io.ReaderAt, size int64, mbr []byte) []Partition {
+	// the MBR disk signature (4 bytes at 0x1B8, a little-endian DWORD); 0 is
+	// "unset" and surfaces as no disk id
+	var diskID string
+	if sig := binary.LittleEndian.Uint32(mbr[440:444]); sig != 0 {
+		diskID = fmt.Sprintf("%08x", sig)
+	}
 	var parts []Partition
 	for i := 0; i < 4; i++ {
 		e := mbr[mbrPartTable+i*mbrEntrySize : mbrPartTable+(i+1)*mbrEntrySize]
@@ -223,6 +237,11 @@ func parseMBR(ra io.ReaderAt, size int64, mbr []byte) []Partition {
 		off := int64(startLBA) * mbrLBASize
 		sz := int64(numSec) * mbrLBASize
 		parts = append(parts, mkPart(ra, size, off, sz, mbrTypeName(typ)))
+	}
+	// the disk signature is disk-level: every primary and logical partition of
+	// this disk carries it (MBR has no per-partition GUID, so PartGUID stays "")
+	for i := range parts {
+		parts[i].DiskID = diskID
 	}
 	return parts
 }
@@ -319,6 +338,13 @@ func parseGPT(ra io.ReaderAt, size int64, hdr []byte, sectorSize int64) ([]Parti
 		return nil, fmt.Errorf("read GPT entries: %w", err)
 	}
 
+	// the GPT disk GUID (header +56, 16 bytes) is disk-level: it repeats on
+	// every partition of this disk as the DiskID
+	var diskID string
+	if dg := hdr[56:72]; !isZeroGUID(dg) {
+		diskID = formatGUID(dg)
+	}
+
 	var parts []Partition
 	for i := int64(0); i < numEntries; i++ {
 		e := table[i*entrySize : i*entrySize+128]
@@ -337,7 +363,12 @@ func parseGPT(ra io.ReaderAt, size int64, hdr []byte, sectorSize int64) ([]Parti
 		if name == "" {
 			name = "GPT " + formatGUID(typeGUID)
 		}
-		parts = append(parts, mkPart(ra, size, off, sz, name))
+		p := mkPart(ra, size, off, sz, name)
+		p.DiskID = diskID
+		if ug := e[16:32]; !isZeroGUID(ug) { // the UNIQUE partition GUID of this volume
+			p.PartGUID = formatGUID(ug)
+		}
+		parts = append(parts, p)
 	}
 	return parts, nil
 }

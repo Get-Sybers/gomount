@@ -145,6 +145,25 @@ func TestResolveVolumesNotesFailedPVMetadata(t *testing.T) {
 	}
 }
 
+// TestDiskIDOf pins the disk-level aggregation materialise and identify
+// share: an LV (which carries no DiskID of its own) still reports the disk
+// id its partition-backed PVs carry, so the two verbs never diverge (PR #22
+// review).
+func TestDiskIDOf(t *testing.T) {
+	const guid = "12345678-9abc-def0-1122-334455667788"
+	vols := []volumeRef{
+		{Source: "p1", FSType: "lvm2-pv", DiskID: guid},
+		{Source: "p2", FSType: "lvm2-pv", DiskID: guid},
+		{Source: "vg0/root", FSType: "ext4"}, // an LV: no DiskID of its own
+	}
+	if got := diskIDOf(vols); got != guid {
+		t.Errorf("diskIDOf = %q, want the disk GUID the PVs carry", got)
+	}
+	if got := diskIDOf([]volumeRef{{Source: "disk", FSType: "ext4"}}); got != "" {
+		t.Errorf("diskIDOf(no disk id) = %q, want empty", got)
+	}
+}
+
 func TestOpenVolumeFSXFSAndVfat(t *testing.T) {
 	for name, probe := range map[string]string{
 		"xfs":   "/etc/hostname",

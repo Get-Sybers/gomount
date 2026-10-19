@@ -129,7 +129,20 @@ type vmdkExtentDesc struct {
 type vmdkDescriptor struct {
 	CreateType string
 	Parent     string // parentFileNameHint, "" when none
+	CID        string // content id (CID=...), 8 hex; always present
+	UUIDImage  string // ddb.uuid.image, the disk's persistent uuid (optional)
 	Extents    []vmdkExtentDesc
+}
+
+// containerID is the VMDK's virtual-disk identity for disk_serial: the
+// persistent ddb.uuid.image rendered canonically when present, else the
+// content id (CID). Empty when the descriptor carried neither (a split
+// extent opened without its descriptor).
+func (d vmdkDescriptor) containerID() string {
+	if id := canonicalVMDKUUID(d.UUIDImage); id != "" {
+		return id
+	}
+	return strings.TrimSpace(d.CID)
 }
 
 func parseVMDKDescriptor(text string) (vmdkDescriptor, error) {
@@ -147,6 +160,10 @@ func parseVMDKDescriptor(text string) (vmdkDescriptor, error) {
 				d.CreateType = v
 			case "parentFileNameHint":
 				d.Parent = v
+			case "CID":
+				d.CID = v
+			case "ddb.uuid.image":
+				d.UUIDImage = v
 			}
 			continue
 		}
@@ -207,8 +224,9 @@ type vmdkExtent struct {
 
 // vmdkDisk concatenates extents into the virtual disk.
 type vmdkDisk struct {
-	extents []vmdkExtent
-	size    int64
+	extents     []vmdkExtent
+	size        int64
+	containerID string // ddb.uuid.image / CID — the disk_serial for a VMDK
 }
 
 func (d *vmdkDisk) ReadAt(p []byte, off int64) (int, error) {
@@ -617,7 +635,7 @@ func openVMDK(path string, depth int) (*vmdkDisk, error) {
 				}
 				return err
 			}
-			return &vmdkDisk{extents: []vmdkExtent{{size: ext.size, ra: ext, close: closer}}, size: ext.size}, nil
+			return &vmdkDisk{extents: []vmdkExtent{{size: ext.size, ra: ext, close: closer}}, size: ext.size, containerID: desc.containerID()}, nil
 		}
 		f.Close()
 	case descriptor:
@@ -649,7 +667,7 @@ func openVMDK(path string, depth int) (*vmdkDisk, error) {
 		}
 		parent = parentDisk
 	}
-	disk := &vmdkDisk{}
+	disk := &vmdkDisk{containerID: desc.containerID()}
 	if parentDisk != nil {
 		disk.extents = append(disk.extents, vmdkExtent{size: 0, ra: zeroReader{}, close: parentDisk.Close})
 	}

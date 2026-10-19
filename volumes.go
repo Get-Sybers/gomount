@@ -31,12 +31,22 @@ import (
 type volumeRef struct {
 	Index    int    // 1-based position in the resolved order (--volume N)
 	Source   string // "p1" | "vg0/root" | "disk" (whole-image filesystem) | "p2/apfs1" (an APFS volume)
-	Offset   int64  // byte offset in the image (partition-backed; 0 for LVs)
+	Offset   int64  // byte offset in the image (partition-backed; 0 for LVs) — the origin record's part_offset
 	Size     int64
 	FSType   string // "ntfs", "ext4", "ext3", "ext2", "xfs", "vfat", "apfs", "apfs-container", "lvm2-pv", or ""
 	TypeName string // partition-table label, or "LVM2 logical volume", or the APFS volume's name and role
 	Note     string
 	ra       io.ReaderAt
+	// Evidence-asset identity for the origin records (frozen manifest-key
+	// contract). DiskID/PartGUID come from the partition table (volumes.go
+	// threads them from partition.Partition); NTFSSerial is the NTFS $Boot
+	// serial (hex) that stands in for an FSUUID on NTFS; DiskSerial is the
+	// image-level drive/container serial, set by openVolume for the one
+	// selected volume. Each is "" when the source carries no such id.
+	DiskID     string
+	PartGUID   string
+	NTFSSerial string
+	DiskSerial string
 	// an APFS volume: its 1-based index in the container the ra spans, and its role
 	apfsIndex int
 	apfsRole  string
@@ -111,6 +121,7 @@ func apfsVolumes(container volumeRef) []volumeRef {
 		out = append(out, volumeRef{
 			Source: container.Source + "/apfs" + strconv.Itoa(v.Index), Offset: container.Offset, Size: container.Size,
 			FSType: "apfs", TypeName: name, ra: container.ra, apfsIndex: v.Index, apfsRole: v.RoleName,
+			DiskID: container.DiskID, PartGUID: container.PartGUID,
 		})
 	}
 	return out
@@ -167,6 +178,7 @@ func resolveVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) 
 		v := volumeRef{
 			Source: "p" + strconv.Itoa(i+1), Offset: p.Offset, Size: p.Size,
 			TypeName: p.TypeName, ra: io.NewSectionReader(ra, p.Offset, p.Size),
+			DiskID: p.DiskID, PartGUID: p.PartGUID,
 		}
 		switch {
 		case p.Size <= 0:
@@ -179,6 +191,7 @@ func resolveVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) 
 			}
 		case p.LikelyNTFS:
 			v.FSType = "ntfs"
+			v.NTFSSerial = ntfsvol.ReadSerial(v.ra, 0)
 		default:
 			v.FSType = fsx.Probe(v.ra, p.Size)
 		}
@@ -210,6 +223,7 @@ func resolveVolumes(ra io.ReaderAt, size int64) ([]volumeRef, []*lvm.VG, error) 
 				v.ra, v.Size = lvRA, lvSize
 				if looksNTFS(lvRA, lvSize) {
 					v.FSType = "ntfs"
+					v.NTFSSerial = ntfsvol.ReadSerial(lvRA, 0)
 				} else {
 					v.FSType = fsx.Probe(lvRA, lvSize)
 				}
@@ -264,6 +278,13 @@ func openVolume(imgPath string, volume int, lvName string) (volumeFS, fsx.FS, vo
 		_ = closeImage()
 		return nil, nil, volumeRef{}, nil, err
 	}
+	// the image-level identity rides the selected volume so the manifest's
+	// metadata row can carry it: the drive/container serial (no extra I/O —
+	// read from the open) and the disk id aggregated across the stack, so an
+	// LV selection reports the same disk_id identify does (not the LV's own
+	// empty value).
+	sel.DiskSerial = image.DiskSerial(ra)
+	sel.DiskID = diskIDOf(vols)
 	fsys, raw, release, err := openRef(sel)
 	if err != nil {
 		_ = closeImage()
@@ -277,6 +298,23 @@ func openVolume(imgPath string, volume int, lvName string) (volumeFS, fsx.FS, vo
 		return closeImage()
 	}
 	return fsys, raw, sel, closer, nil
+}
+
+// diskIDOf returns the disk-level disk id (GPT disk GUID / MBR signature) of
+// a resolved stack: the first volume that carries one. Because the id is
+// disk-level, every partition-backed volume of the disk reports the same
+// value, while an LVM logical volume or a whole-disk filesystem carries
+// none — so aggregating across the stack gives materialise's single selected
+// volume (which may be an LV) the same disk_id that identify reports for the
+// image. "" when no volume carries one (a superfloppy, an APM disk, a zero
+// MBR signature).
+func diskIDOf(vols []volumeRef) string {
+	for _, v := range vols {
+		if v.DiskID != "" {
+			return v.DiskID
+		}
+	}
+	return ""
 }
 
 // selectVolume applies the addressing rules over the resolved list.

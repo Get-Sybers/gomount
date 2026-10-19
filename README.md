@@ -93,10 +93,10 @@ gomount cat    <image> <path>      write a file's bytes to stdout
 gomount stat   <image> <path>      print one entry's metadata
 gomount tree   <image> [path]      list a subtree
 gomount browse <image>             navigate the volume interactively
-gomount identify <image>           print the resolved volume stack as JSON
+gomount identify [--hash] <image>  print the resolved volume stack as JSON
 gomount timeline <image>           one JSONL row per (file, timestamp kind)
 gomount stream [--jsonl] [--all] <image>   walk the whole filesystem for tools
-gomount materialise --out DIR [--set NAME]... [--select GLOB]... [--siblings] [--manifest] <image>
+gomount materialise --out DIR [--set NAME]... [--select GLOB]... [--siblings] [--manifest] [--hash] <image>
 ```
 
 `stream` writes one tar entry per regular file (mode `0400`, the mtime
@@ -124,6 +124,18 @@ volume's place in the stack (`p1` | `vg/lv` | `disk`), the filesystem UUID
 and label, the inode/mftid, a `staged` path when it differs, a `skip`
 reason for files held back by `--max-file-size`, and the residue
 kind/detail on `--residue` rows.
+Every row also carries the volume-scoped **evidence-asset identity** so a
+consumer can key a row to a resolved asset: `volume_guid` (the filesystem
+UUID when it is a canonical 128-bit id), `part_guid` (the GPT unique
+partition GUID) and `part_offset` (the partition byte offset). The
+image-level identity rides a single **path-less metadata row**:
+`disk_serial` (the drive serial from an EWF header, or a virtual disk's
+container uuid), `disk_id` (the GPT disk GUID or MBR disk signature) and,
+with `--hash`, `image_sha256` (sha256 of the container bytes as delivered).
+An NTFS volume has no filesystem UUID, so its `$Boot` serial (hex) stands in
+as `fsuuid`; its Windows `\\?\Volume{GUID}` is derived downstream from
+`disk_id`/`part_guid`/`part_offset`. Fields a format or filesystem does not
+carry are omitted (honest nulls): raw/dd and QCOW2 have no `disk_serial`.
 The artefact sets are defined in `materialise-sets.yml`, embedded at build
 time (`go:embed`) — adding a set or a sibling suffix is a data edit, never a
 Go change. Each named set lists one or more **primary** artefacts to copy

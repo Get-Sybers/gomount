@@ -26,6 +26,10 @@ var (
 	vhdxMetaSize   = [16]byte{0x24, 0x42, 0xa5, 0x2f, 0x1b, 0xcd, 0x76, 0x48, 0xb2, 0x11, 0x5d, 0xbe, 0xd8, 0x3b, 0xf4, 0xb8}
 	vhdxMetaSector = [16]byte{0x1d, 0xbf, 0x41, 0x81, 0x6f, 0xa9, 0x09, 0x47, 0xba, 0x47, 0xf2, 0x33, 0xa8, 0xfa, 0xab, 0x5f}
 	vhdxMetaParent = [16]byte{0x2d, 0x5f, 0xd3, 0xa8, 0x0b, 0xb3, 0x4d, 0x45, 0xab, 0xf7, 0xd3, 0xd8, 0x48, 0x34, 0xab, 0x0c}
+	// "Virtual Disk ID" (BECA12AB-B2E6-4523-93EF-C309E000C746): the per-disk
+	// identity, the disk_serial for a VHDX. Stored as an MS GUID (first three
+	// fields little-endian), like the metadata-item ids above.
+	vhdxMetaVDiskID = [16]byte{0xab, 0x12, 0xca, 0xbe, 0xe6, 0xb2, 0x23, 0x45, 0x93, 0xef, 0xc3, 0x09, 0xe0, 0x00, 0xc7, 0x46}
 )
 
 const (
@@ -41,6 +45,7 @@ type vhdxDisk struct {
 	blockSize   int64
 	sectorSize  int64
 	chunkRatio  int64
+	diskID      [16]byte // "Virtual Disk ID" metadata item — the disk_serial for a VHDX
 	bat         []uint64
 	parent      io.ReaderAt
 	parentClose func() error
@@ -233,6 +238,13 @@ func openVHDX(path string, depth int) (*vhdxDisk, error) {
 			if e.length >= 4 {
 				if _, err := f.ReadAt(b[:4], base); err == nil {
 					d.sectorSize = int64(binary.LittleEndian.Uint32(b[0:4]))
+				}
+			}
+		case vhdxMetaVDiskID:
+			if e.length >= 16 {
+				var id [16]byte
+				if _, err := f.ReadAt(id[:], base); err == nil {
+					d.diskID = id
 				}
 			}
 		}

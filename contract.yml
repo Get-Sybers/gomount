@@ -58,7 +58,15 @@ summary_schema:
     each row an ORIGIN RECORD (docs/linux §5.4): path/size/mtime plus image,
     volume (p1 | vg/lv | disk), fsuuid, label, inode/mftid, a staged path when
     it differs, a skip reason for files held back (--max-file-size), and the
-    residue kind/detail for --residue rows. The other verbs print no summary:
+    residue kind/detail for --residue rows. Every per-file row also carries
+    the volume-scoped evidence-asset keys volume_guid (the fsuuid when a
+    canonical 128-bit UUID), part_guid (the GPT unique partition GUID) and
+    part_offset; a leading PATH-LESS metadata row carries the image-level
+    keys disk_serial (EWF sn / virtual-disk container uuid), disk_id (GPT disk
+    GUID / MBR disk signature) and, with --hash, image_sha256 (sha256 of the
+    container bytes as delivered). An NTFS volume's $Boot serial rides fsuuid
+    (no volume_guid). All new keys are lower_snake and omitted when absent.
+    The other verbs print no summary:
     stream writes the tar (or, with --jsonl, one JSON object per file) to
     stdout; identify prints one JSON document; timeline prints JSONL rows and
     one stderr summary line.
@@ -66,7 +74,7 @@ summary_schema:
 outputs:
   stream: "stdout: a tar archive, one regular-file entry per volume file (entry name = the file's volume path; with --all every entry — directories and symlinks too — carrying uid/gid/mode and the access/change times, so the tar extracts into a browsable root), or one JSON object per file with --jsonl"
   materialise: "<out>/<volume-path> at mode 0400 per pulled file (+ named siblings with --siblings), residue/<kind>/<id>/<volume-path> with --residue, <out>/materialise.jsonl with --manifest (the done marker a lane gates on); stdout: the one summary line"
-  identify: "stdout: ONE JSON document — image, partitions, LVM findings, every volume's fstype/UUID/label/OS guess, snapshot inventory (P3, empty until then); for a UAC collection a `collection` block (tool, version, container, hostname, os, arch, timezone, mount_point, started, finished, command_line, member counts, truncated) and the two volumes [root] (fstype uac) and uac (fstype uac-meta)"
+  identify: "stdout: ONE JSON document — image (path/format/size, plus disk_serial, disk_id and, with --hash, sha256), partitions (with part_guid), LVM findings, every volume's fstype/UUID/label/OS guess plus volume_guid/part_guid (an NTFS volume's uuid is its $Boot serial), snapshot inventory (P3, empty until then); for a UAC collection a `collection` block (tool, version, container, hostname, os, arch, timezone, mount_point, started, finished, command_line, member counts, truncated) and the two volumes [root] (fstype uac) and uac (fstype uac-meta)"
   timeline: "stdout: one JSONL row per (file, timestamp kind) with allocation state (--residue adds recovered rows, --hash content digests); stderr: one summary line"
   mount: "a read-only NTFS mount at --mount-point (default /mnt/ntfs) held in the foreground until umount"
 
@@ -76,8 +84,8 @@ hardening:
 
 argv_passthrough: >
   gomount stream [--jsonl] [--all] [--filter GLOB] [--volume N | --lv vg/lv] <image> |
-  gomount materialise --out DIR [--set NAME]... [--select GLOB]... [--siblings] [--manifest] [--max-file-size N] [--residue] [--volume N | --lv vg/lv] <image> |
-  gomount identify <image> |
+  gomount materialise --out DIR [--set NAME]... [--select GLOB]... [--siblings] [--manifest] [--max-file-size N] [--residue] [--hash] [--volume N | --lv vg/lv] <image> |
+  gomount identify [--hash] <image> |
   gomount timeline [--volume N | --lv vg/lv] [--residue] [--hash] <image> |
   gomount ls|cat|stat|tree|browse [--volume N | --lv vg/lv] <image> [path] |
   gomount mount [--read-only] [--mount-point PATH] [--volume N] [--work PATH] [--no-self-unshare] [--foreground] <image> |

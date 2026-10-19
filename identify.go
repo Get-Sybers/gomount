@@ -36,6 +36,13 @@ type identifyImage struct {
 	Path   string `json:"path"`
 	Format string `json:"format"` // "e01" | "dmg" | "sparseimage" | "sparsebundle" | "vmdk" | "vhdx" | "vhd" | "qcow2" | "vdi" | "zip" | "gzip" | "tar" | "raw"
 	Size   int64  `json:"size"`
+	// Evidence-asset identity (the manifest's image-level keys):
+	// disk_serial = drive serial (EWF sn) / virtual-disk container uuid;
+	// disk_id = GPT disk GUID / MBR disk signature; sha256 = the container
+	// bytes as delivered, only with --hash. Omitted when absent.
+	DiskSerial string `json:"disk_serial,omitempty"`
+	DiskID     string `json:"disk_id,omitempty"`
+	SHA256     string `json:"sha256,omitempty"`
 }
 
 // identifyCollection describes a UAC collection: what the collector's own
@@ -59,10 +66,11 @@ type identifyCollection struct {
 }
 
 type identifyPart struct {
-	Index  int    `json:"index"`
-	Offset int64  `json:"offset"`
-	Size   int64  `json:"size"`
-	Type   string `json:"type"`
+	Index    int    `json:"index"`
+	Offset   int64  `json:"offset"`
+	Size     int64  `json:"size"`
+	Type     string `json:"type"`
+	PartGUID string `json:"part_guid,omitempty"` // GPT unique partition GUID (empty on MBR/APM)
 }
 
 type identifyLVM struct {
@@ -90,21 +98,27 @@ type identifyVolume struct {
 	Offset int64  `json:"offset,omitempty"`
 	Size   int64  `json:"size"`
 	FSType string `json:"fstype,omitempty"`
-	UUID   string `json:"uuid,omitempty"`
+	UUID   string `json:"uuid,omitempty"` // FS UUID (ext/XFS/APFS/HFS+), vfat serial, or the NTFS $Boot serial (hex)
 	Label  string `json:"label,omitempty"`
 	OS     string `json:"os,omitempty"` // "linux (debian)" | "windows" | ""
-	Note   string `json:"note,omitempty"`
+	// Volume-scoped evidence-asset keys: volume_guid = UUID when it is a
+	// canonical 128-bit UUID; part_guid = GPT unique partition GUID of this
+	// volume; part_offset is the offset field above.
+	VolumeGUID string `json:"volume_guid,omitempty"`
+	PartGUID   string `json:"part_guid,omitempty"`
+	Note       string `json:"note,omitempty"`
 }
 
 func runIdentify(argv []string) int {
 	fs := flag.NewFlagSet("identify", flag.ExitOnError)
+	withHash := fs.Bool("hash", false, "stream sha256 over the container bytes as delivered and report it as image.sha256")
 	fs.Usage = usage
 	_ = fs.Parse(argv)
 	if fs.NArg() != 1 {
-		fmt.Fprintln(os.Stderr, "gomount identify: usage: identify <image>")
+		fmt.Fprintln(os.Stderr, "gomount identify: usage: identify [--hash] <image>")
 		return 1
 	}
-	doc, err := identifyImageFile(fs.Arg(0))
+	doc, err := identifyImageFile(fs.Arg(0), *withHash)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "gomount: %v\n", err)
 		return 1
@@ -119,7 +133,7 @@ func runIdentify(argv []string) int {
 	return 0
 }
 
-func identifyImageFile(path string) (*identifyDoc, error) {
+func identifyImageFile(path string, withHash bool) (*identifyDoc, error) {
 	ra, size, closeImage, err := image.OpenImage(path)
 	if err != nil {
 		return nil, fmt.Errorf("open image: %w", err)
@@ -127,13 +141,23 @@ func identifyImageFile(path string) (*identifyDoc, error) {
 	defer func() { _ = closeImage() }()
 
 	doc := &identifyDoc{
-		Image:     identifyImage{Path: path, Format: sniffFormat(path), Size: size},
+		Image:     identifyImage{Path: path, Format: sniffFormat(path), Size: size, DiskSerial: image.DiskSerial(ra)},
 		Snapshots: []any{},
+	}
+	if withHash {
+		if h, herr := image.HashContainer(path); herr != nil {
+			fmt.Fprintf(os.Stderr, "gomount identify: --hash: %v\n", herr)
+		} else {
+			doc.Image.SHA256 = h
+		}
 	}
 	vols, vgs, err := resolveVolumes(ra, size)
 	if err != nil {
 		return nil, err
 	}
+	// disk_id is disk-level: the same helper materialise uses, so both report
+	// the same id for an image (an LV-selected manifest included).
+	doc.Image.DiskID = diskIDOf(vols)
 	defer closeCollections(vols)
 	if len(vols) > 0 && vols[0].collection != nil {
 		doc.Collection = describeCollection(vols[0].collection)
@@ -142,17 +166,20 @@ func identifyImageFile(path string) (*identifyDoc, error) {
 		if strings.HasPrefix(v.Source, "p") && !strings.Contains(v.Source, "/") {
 			doc.Partitions = append(doc.Partitions, identifyPart{
 				Index: v.Index, Offset: v.Offset, Size: v.Size, Type: v.TypeName,
+				PartGUID: v.PartGUID,
 			})
 		}
 		iv := identifyVolume{
 			Volume: v.Index, Source: v.Source, Offset: v.Offset, Size: v.Size,
-			FSType: v.FSType,
-			Note:   v.Note,
+			FSType:   v.FSType,
+			PartGUID: v.PartGUID,
+			Note:     v.Note,
 		}
 		if v.FSType != "" && v.FSType != "lvm2-pv" && v.FSType != "ntfs" && v.FSType != "apfs-container" && v.ra != nil {
 			if _, raw, release, ferr := openRef(v); ferr == nil && raw != nil {
 				info := raw.Info()
 				iv.UUID, iv.Label = info.UUID, info.Label
+				iv.VolumeGUID = canonicalVolumeGUID(info.UUID)
 				iv.OS = osGuess(raw)
 				if release != nil {
 					release()
@@ -164,6 +191,7 @@ func identifyImageFile(path string) (*identifyDoc, error) {
 		}
 		if v.FSType == "ntfs" {
 			iv.OS = "windows"
+			iv.UUID = v.NTFSSerial // the $Boot serial stands in for an FSUUID
 		}
 		if v.FSType == "" && v.ra != nil {
 			// beside the stack's own note (a truncated capture, a failed

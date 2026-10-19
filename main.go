@@ -102,8 +102,8 @@ USERSPACE backend — pure in-process go-ntfs parsing, no mount, no FUSE, no pri
   gomount browse [--volume N] <image>
   gomount stream [--volume N] [--filter GLOB] [--jsonl] [--all] <image>
   gomount materialise [--volume N] --out DIR [--set NAME]... [--select GLOB]... \
-                 [--siblings=true] [--manifest] <image>
-  gomount identify <image>
+                 [--siblings=true] [--manifest] [--hash] <image>
+  gomount identify [--hash] <image>
   gomount timeline [--volume N | --lv vg/lv] [--residue] [--hash] <image>
 
   The userspace verbs read NTFS, the Linux filesystems (ext2/3/4, XFS,
@@ -149,6 +149,8 @@ USERSPACE backend — pure in-process go-ntfs parsing, no mount, no FUSE, no pri
   --select GLOB materialise: ad-hoc volume-path glob to pull, repeatable
   --siblings    materialise: also pull each artefact's named siblings (default true)
   --manifest    materialise: write <out>/materialise.jsonl for the pulled files
+  --hash        identify/materialise: stream sha256 over the container bytes as
+                delivered and record it as image_sha256 (identify: image.sha256)
 
   browse is an interactive REPL (ls, cd, cat, stat, get, pwd, help, quit); stream
   writes a tar of the filtered files to stdout for a downstream tool (e.g. goyara),
