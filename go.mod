@@ -6,7 +6,7 @@ require (
 	github.com/Get-Sybers/gopinfo v0.2.1
 	github.com/Velocidex/go-ewf v0.0.0-20260301075014-ed09cb7887b6
 	github.com/Velocidex/yaml/v2 v2.2.8
-	github.com/hanwen/go-fuse/v2 v2.11.0
+	github.com/hanwen/go-fuse/v2 v2.12.0
 	www.velocidex.com/golang/go-ntfs v0.2.1
 )
 
